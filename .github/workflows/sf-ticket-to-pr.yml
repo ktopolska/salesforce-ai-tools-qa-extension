@@ -384,6 +384,12 @@ jobs:
       - name: Install skills and rules globally
         run: bash .sf-ai-tools/scripts/install-sf-ai-tools.sh
 
+      - name: Install local QA skills
+        run: |
+          for d in .claude/skills/qa-plan .claude/skills/qa-run .claude/skills/qa-eval .claude/skills/_qa-types .claude/skills/_qa-shared; do
+            ln -sfn "$(pwd)/$d" "$HOME/.claude/skills/$(basename $d)"
+          done
+
       - name: Generate test plan
         uses: anthropics/claude-code-action@v1
         id: claude
@@ -458,6 +464,12 @@ jobs:
 
       - name: Install skills and rules globally
         run: bash .sf-ai-tools/scripts/install-sf-ai-tools.sh
+
+      - name: Install local QA skills
+        run: |
+          for d in .claude/skills/qa-plan .claude/skills/qa-run .claude/skills/qa-eval .claude/skills/_qa-types .claude/skills/_qa-shared; do
+            ln -sfn "$(pwd)/$d" "$HOME/.claude/skills/$(basename $d)"
+          done
 
       - name: Configure git
         run: |
