@@ -312,7 +312,7 @@ jobs:
 
       - name: Do the work
         uses: anthropics/claude-code-action@v1
-        id: claude
+        id: claude-dev
         with:
           prompt: |
             Read ~/.claude/skills/sf-ticket-to-pr/SKILL.md for instructions.
@@ -334,13 +334,112 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Report AI cost
+      - name: Report dev AI cost
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
-          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          EXECUTION_FILE: ${{ steps.claude-dev.outputs.execution_file }}
         run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
+
+      # ─── QA TRACK (inline) ───────────────────────────────────────────
+      # After dev work completes, poll for the test plan artifact from
+      # the parallel qa-plan job, then run QA tests in this same scratch
+      # org session.
+
+      - name: Poll for test plan
+        id: poll-test-plan
+        if: steps.claude-dev.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MAX_WAIT=600
+          INTERVAL=30
+          elapsed=0
+          while [ $elapsed -lt $MAX_WAIT ]; do
+            ARTIFACT_ID=$(gh api "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
+              --jq '.artifacts[] | select(.name == "test-plan") | .id' 2>/dev/null || true)
+            if [ -n "$ARTIFACT_ID" ]; then
+              gh api "/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip" > /tmp/test-plan.zip
+              unzip -o /tmp/test-plan.zip -d /tmp/
+              echo "qa-plan-ready=true" >> $GITHUB_OUTPUT
+              echo "::notice::Test plan artifact downloaded successfully"
+              exit 0
+            fi
+            echo "Waiting for test-plan artifact... (${elapsed}s / ${MAX_WAIT}s)"
+            sleep $INTERVAL
+            elapsed=$((elapsed + INTERVAL))
+          done
+          echo "qa-plan-ready=false" >> $GITHUB_OUTPUT
+          echo "::warning::Test plan artifact not found after ${MAX_WAIT}s — skipping QA"
+
+      - name: Run QA tests and evaluate
+        if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
+        uses: anthropics/claude-code-action@v1
+        id: claude-qa
+        continue-on-error: true
+        with:
+          prompt: |
+            Read ~/.claude/skills/qa-run/SKILL.md for instructions.
+
+            Execute the test plan at /tmp/test-plan.md against the scratch org aliased "${{ env.SCRATCH_ORG_ALIAS }}".
+
+            If /tmp/test-plan.md does not exist, is empty, or cannot be parsed as a test plan, skip QA testing entirely and post a comment noting that QA was skipped due to missing/invalid test plan.
+
+            After execution, read ~/.claude/skills/qa-eval/SKILL.md and evaluate the results.
+            Post the QA report on PR for issue #${{ env.NUMBER }} in ${{ github.repository }}.
+
+            IMPORTANT for screenshots:
+            1. Run: mkdir -p /tmp/qa-screenshots
+            2. During E2E tests, save every Playwright screenshot to /tmp/qa-screenshots/<scenario-id>.png
+            3. Use browser_take_screenshot with savePath="/tmp/qa-screenshots/ET-001.png" etc.
+            4. After posting the report, also commit screenshots: cp /tmp/qa-screenshots/*.png .verification/qa/ && git add .verification/qa/ && git commit -m "qa: screenshots for issue #${{ env.NUMBER }}" && git push
+          claude_args: "--max-turns 90 --model claude-sonnet-4-6"
+          additional_permissions: "Bash(git*),Bash(cp*),Bash(mkdir*)"
+          show_full_output: "true"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload QA screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-screenshots
+          path: /tmp/qa-screenshots/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload QA videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-videos
+          path: /tmp/qa-videos/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Report QA AI cost
+        if: steps.claude-qa.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
+          EXECUTION_FILE: ${{ steps.claude-qa.outputs.execution_file }}
+        run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
+
+      - name: Evaluate job outcome
+        if: always()
+        run: |
+          if [ "${{ steps.claude-dev.outcome }}" = "failure" ]; then
+            echo "::error::Dev work failed"
+            exit 1
+          fi
+          if [ "${{ steps.claude-qa.outcome }}" = "failure" ]; then
+            echo "::warning::QA testing failed (advisory — not blocking the job)"
+          fi
+          if [ "${{ steps.poll-test-plan.outputs.qa-plan-ready }}" = "false" ]; then
+            echo "::warning::QA was skipped — test plan artifact was not available"
+          fi
 
       - name: Notify on execute failure
         if: failure()
@@ -356,11 +455,10 @@ jobs:
             gh issue comment "$NUMBER" --repo ${{ github.repository }} --body "I couldn't finish — the run errored. See the [run logs]($RUN_URL). Mention me again to retry."
           fi
 
-  # ─── QA TRACK ──────────────────────────────────────────────────────
-  # Independent QA pipeline that shadows the dev track. Generates a
-  # requirements-driven test plan (qa-plan) in parallel with execute,
-  # then runs data + e2e tests against the scratch org (qa-execute)
-  # once both are done. Zero edits to triage or execute above.
+  # ─── QA PLAN ───────────────────────────────────────────────────────
+  # Generates a requirements-driven test plan in parallel with execute.
+  # The execute job polls for the resulting artifact after dev work
+  # completes, then runs QA tests inline.
 
   qa-plan:
     name: qa-plan
@@ -426,127 +524,3 @@ jobs:
         run: |
           gh issue comment "$NUMBER" --repo ${{ github.repository }} --body "QA plan generation failed. See the [run logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}). This does not affect the dev track."
 
-  qa-execute:
-    name: qa-execute
-    needs: [triage, execute, qa-plan]
-    if: needs.execute.result == 'success' && needs.qa-plan.result == 'success'
-    runs-on: ubuntu-latest
-    concurrency:
-      group: scratch-org-${{ needs.triage.outputs.scratch_key }}
-      cancel-in-progress: false
-    env:
-      DEV_HUB_URL: set
-      NUMBER: ${{ needs.triage.outputs.number }}
-      SCRATCH_ORG_ALIAS: pr-${{ needs.triage.outputs.scratch_key }}
-      ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.triage.outputs.pr_branch }}
-
-      - name: Checkout salesforce-ai-tools (skills + scripts)
-        uses: actions/checkout@v6
-        with:
-          repository: aquivalabs/salesforce-ai-tools
-          path: .sf-ai-tools
-
-      - name: Install skills and rules globally
-        run: bash scripts/install-sf-ai-tools.sh
-
-
-      - name: Configure git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: Install Salesforce CLI
-        run: npm install --global @salesforce/cli
-
-      - name: Install Playwright Chromium
-        run: npx --yes playwright install --with-deps chromium
-
-      - name: Authenticate DevHub
-        run: sf org login sfdx-url --set-default-dev-hub --sfdx-url-stdin <<< "${{ secrets.SFDX_AUTH_URL }}"
-
-      - name: Restore scratch org auth from cache
-        uses: actions/cache@v5
-        with:
-          path: /tmp/sfdx-auth-${{ env.SCRATCH_ORG_ALIAS }}.url
-          key: scratch-auth-${{ env.SCRATCH_ORG_ALIAS }}
-
-      - name: Restore scratch org
-        run: HEADLESS=true ./scripts/create-scratch-org.sh
-
-      - name: Download test plan
-        uses: actions/download-artifact@v4
-        with:
-          name: test-plan
-          path: /tmp/
-
-      - name: Run QA tests and evaluate
-        uses: anthropics/claude-code-action@v1
-        id: claude
-        with:
-          prompt: |
-            Read ~/.claude/skills/qa-run/SKILL.md for instructions.
-
-            Execute the test plan at /tmp/test-plan.md against the scratch org aliased "${{ env.SCRATCH_ORG_ALIAS }}".
-
-            After execution, read ~/.claude/skills/qa-eval/SKILL.md and evaluate the results.
-            Post the QA report on PR for issue #${{ env.NUMBER }} in ${{ github.repository }}.
-
-            IMPORTANT for screenshots:
-            1. Run: mkdir -p /tmp/qa-screenshots
-            2. During E2E tests, save every Playwright screenshot to /tmp/qa-screenshots/<scenario-id>.png
-            3. Use browser_take_screenshot with savePath="/tmp/qa-screenshots/ET-001.png" etc.
-            4. After posting the report, also commit screenshots: cp /tmp/qa-screenshots/*.png .verification/qa/ && git add .verification/qa/ && git commit -m "qa: screenshots for issue #${{ env.NUMBER }}" && git push
-          claude_args: "--max-turns 90 --model claude-sonnet-4-6"
-          additional_permissions: "Bash(git*),Bash(cp*),Bash(mkdir*)"
-          show_full_output: "true"
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload QA screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qa-screenshots
-          path: /tmp/qa-screenshots/
-          retention-days: 30
-          if-no-files-found: ignore
-
-      - name: Upload QA videos
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qa-videos
-          path: /tmp/qa-videos/
-          retention-days: 30
-          if-no-files-found: ignore
-
-      - name: Report AI cost
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
-          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
-        run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
-
-      - name: Notify on qa-execute failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NUMBER: ${{ needs.triage.outputs.number }}
-          KIND: ${{ needs.triage.outputs.kind }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          if [ "$KIND" = "pr" ]; then
-            gh pr comment "$NUMBER" --repo ${{ github.repository }} --body "QA testing failed. See the [run logs]($RUN_URL). This does not block the PR — review the dev changes independently."
-          else
-            gh issue comment "$NUMBER" --repo ${{ github.repository }} --body "QA testing failed. See the [run logs]($RUN_URL). The dev track may have succeeded — check the PR."
-          fi
