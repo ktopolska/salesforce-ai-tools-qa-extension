@@ -377,10 +377,10 @@ jobs:
         if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
         run: npm install --no-save playwright
 
-      - name: Run QA tests and evaluate
+      - name: Run QA tests
         if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
         uses: anthropics/claude-code-action@v1
-        id: claude-qa
+        id: claude-qa-run
         continue-on-error: true
         with:
           prompt: |
@@ -388,18 +388,48 @@ jobs:
 
             Execute the test plan at /tmp/test-plan.md against the scratch org aliased "${{ env.SCRATCH_ORG_ALIAS }}".
 
-            If /tmp/test-plan.md does not exist, is empty, or cannot be parsed as a test plan, skip QA testing entirely and post a comment noting that QA was skipped due to missing/invalid test plan.
+            If /tmp/test-plan.md does not exist, is empty, or cannot be parsed as a test plan, write an empty results file to /tmp/qa-results.json and stop.
 
-            After execution, read ~/.claude/skills/qa-eval/SKILL.md and evaluate the results.
-            Post the QA report on PR for issue #${{ env.NUMBER }} in ${{ github.repository }}.
+            IMPORTANT: Write your results to /tmp/qa-results.json as you go. A separate step will handle evaluation and reporting — do NOT read qa-eval or post any report yourself.
 
             IMPORTANT for screenshots:
             1. Run: mkdir -p /tmp/qa-screenshots
             2. During E2E tests, save every Playwright screenshot to /tmp/qa-screenshots/<scenario-id>.png
             3. Use browser_take_screenshot with savePath="/tmp/qa-screenshots/ET-001.png" etc.
-            4. After posting the report, also commit screenshots: cp /tmp/qa-screenshots/*.png .verification/qa/ && git add .verification/qa/ && git commit -m "qa: screenshots for issue #${{ env.NUMBER }}" && git push
-          claude_args: "--max-turns 90 --model claude-sonnet-4-6"
+          claude_args: "--max-turns 75 --model claude-sonnet-4-6"
           additional_permissions: "Bash(git*),Bash(cp*),Bash(mkdir*),Bash(node*),Bash(npm*),Bash(npx*),Bash(find*)"
+          show_full_output: "true"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Report QA run AI cost
+        if: steps.claude-qa-run.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
+          EXECUTION_FILE: ${{ steps.claude-qa-run.outputs.execution_file }}
+        run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
+
+      - name: Evaluate and post QA report
+        if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
+        uses: anthropics/claude-code-action@v1
+        id: claude-qa-eval
+        continue-on-error: true
+        with:
+          prompt: |
+            Read ~/.claude/skills/qa-eval/SKILL.md for instructions.
+
+            Read the test results from /tmp/qa-results.json. If the file does not exist or is empty, post a comment on the PR/issue noting "QA tests could not complete — no results available."
+
+            If the results are partial (e.g., E2E tests did not complete), include whatever data test results are available and note which phases were incomplete.
+
+            Generate and post the QA report on PR for issue #${{ env.NUMBER }} in ${{ github.repository }}.
+
+            After posting the report, commit screenshots if any exist:
+            cp /tmp/qa-screenshots/*.png .verification/qa/ 2>/dev/null && git add .verification/qa/ && git commit -m "qa: screenshots for issue #${{ env.NUMBER }}" && git push || true
+          claude_args: "--max-turns 30 --model claude-sonnet-4-6"
+          additional_permissions: "Bash(git*),Bash(cp*),Bash(mkdir*)"
           show_full_output: "true"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -423,12 +453,12 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
-      - name: Report QA AI cost
-        if: steps.claude-qa.outcome != 'skipped'
+      - name: Report QA eval AI cost
+        if: steps.claude-qa-eval.outcome != 'skipped'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
-          EXECUTION_FILE: ${{ steps.claude-qa.outputs.execution_file }}
+          EXECUTION_FILE: ${{ steps.claude-qa-eval.outputs.execution_file }}
         run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
 
       - name: Evaluate job outcome
@@ -438,8 +468,11 @@ jobs:
             echo "::error::Dev work failed"
             exit 1
           fi
-          if [ "${{ steps.claude-qa.outcome }}" = "failure" ]; then
-            echo "::warning::QA testing failed (advisory — not blocking the job)"
+          if [ "${{ steps.claude-qa-run.outcome }}" = "failure" ]; then
+            echo "::warning::QA test execution failed (advisory — not blocking the job)"
+          fi
+          if [ "${{ steps.claude-qa-eval.outcome }}" = "failure" ]; then
+            echo "::warning::QA report generation failed (advisory — not blocking the job)"
           fi
           if [ "${{ steps.poll-test-plan.outputs.qa-plan-ready }}" = "false" ]; then
             echo "::warning::QA was skipped — test plan artifact was not available"
