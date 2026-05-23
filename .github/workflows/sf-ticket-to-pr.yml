@@ -79,7 +79,7 @@ jobs:
           path: .sf-ai-tools
 
       - name: Install skills and rules globally
-        run: bash .sf-ai-tools/scripts/install-sf-ai-tools.sh
+        run: bash scripts/install-sf-ai-tools.sh
 
       # Normalize the event into a few simple variables: is this an issue or a
       # PR? what's the number? if it's a PR, what's the head branch? The agent
@@ -277,7 +277,7 @@ jobs:
           path: .sf-ai-tools
 
       - name: Install skills and rules globally
-        run: bash .sf-ai-tools/scripts/install-sf-ai-tools.sh
+        run: bash scripts/install-sf-ai-tools.sh
 
       - name: Configure git
         run: |
@@ -356,4 +356,184 @@ jobs:
             gh pr comment "$NUMBER" --repo ${{ github.repository }} --body "I couldn't finish — the run errored. See the [run logs]($RUN_URL). Mention me again to retry."
           else
             gh issue comment "$NUMBER" --repo ${{ github.repository }} --body "I couldn't finish — the run errored. See the [run logs]($RUN_URL). Mention me again to retry."
+          fi
+
+  # ─── QA TRACK ──────────────────────────────────────────────────────
+  # Independent QA pipeline that shadows the dev track. Generates a
+  # requirements-driven test plan (qa-plan) in parallel with execute,
+  # then runs data + e2e tests against the scratch org (qa-execute)
+  # once both are done. Zero edits to triage or execute above.
+
+  qa-plan:
+    name: qa-plan
+    needs: triage
+    if: needs.triage.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Checkout salesforce-ai-tools (skills + scripts)
+        uses: actions/checkout@v6
+        with:
+          repository: aquivalabs/salesforce-ai-tools
+          path: .sf-ai-tools
+
+      - name: Install skills and rules globally
+        run: bash scripts/install-sf-ai-tools.sh
+
+
+      - name: Generate test plan
+        uses: anthropics/claude-code-action@v1
+        id: claude
+        with:
+          prompt: |
+            Read ~/.claude/skills/qa-plan/SKILL.md for instructions.
+
+            Generate a test plan for issue #${{ needs.triage.outputs.number }} in ${{ github.repository }}.
+
+            The triage plan (what the dev agent committed to):
+
+            --- Plan ---
+            ${{ needs.triage.outputs.plan }}
+            --- End plan ---
+          claude_args: "--max-turns 15 --model claude-sonnet-4-6"
+          show_full_output: "true"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload test plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-plan
+          path: /tmp/test-plan.md
+          retention-days: 30
+
+      - name: Report AI cost
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
+
+      - name: Notify on qa-plan failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUMBER: ${{ needs.triage.outputs.number }}
+        run: |
+          gh issue comment "$NUMBER" --repo ${{ github.repository }} --body "QA plan generation failed. See the [run logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}). This does not affect the dev track."
+
+  qa-execute:
+    name: qa-execute
+    needs: [triage, execute, qa-plan]
+    if: needs.execute.result == 'success' && needs.qa-plan.result == 'success'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: scratch-org-${{ needs.triage.outputs.scratch_key }}
+      cancel-in-progress: false
+    env:
+      DEV_HUB_URL: set
+      NUMBER: ${{ needs.triage.outputs.number }}
+      SCRATCH_ORG_ALIAS: pr-${{ needs.triage.outputs.scratch_key }}
+      ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.triage.outputs.pr_branch }}
+
+      - name: Checkout salesforce-ai-tools (skills + scripts)
+        uses: actions/checkout@v6
+        with:
+          repository: aquivalabs/salesforce-ai-tools
+          path: .sf-ai-tools
+
+      - name: Install skills and rules globally
+        run: bash scripts/install-sf-ai-tools.sh
+
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Install Salesforce CLI
+        run: npm install --global @salesforce/cli
+
+      - name: Install Playwright Chromium
+        run: npx --yes playwright install --with-deps chromium
+
+      - name: Authenticate DevHub
+        run: sf org login sfdx-url --set-default-dev-hub --sfdx-url-stdin <<< "${{ secrets.SFDX_AUTH_URL }}"
+
+      - name: Restore scratch org auth from cache
+        uses: actions/cache@v5
+        with:
+          path: /tmp/sfdx-auth-${{ env.SCRATCH_ORG_ALIAS }}.url
+          key: scratch-auth-${{ env.SCRATCH_ORG_ALIAS }}
+
+      - name: Restore scratch org
+        run: HEADLESS=true ./scripts/create-scratch-org.sh
+
+      - name: Download test plan
+        uses: actions/download-artifact@v4
+        with:
+          name: test-plan
+          path: /tmp/
+
+      - name: Run QA tests and evaluate
+        uses: anthropics/claude-code-action@v1
+        id: claude
+        with:
+          prompt: |
+            Read ~/.claude/skills/qa-run/SKILL.md for instructions.
+
+            Execute the test plan at /tmp/test-plan.md against the scratch org aliased "${{ env.SCRATCH_ORG_ALIAS }}".
+
+            After execution, read ~/.claude/skills/qa-eval/SKILL.md and evaluate the results.
+            Post the QA report on PR for issue #${{ env.NUMBER }} in ${{ github.repository }}.
+          claude_args: "--max-turns 45 --model claude-sonnet-4-6 --mcp-config ~/.claude/mcp.json --permission-mode bypassPermissions"
+          show_full_output: "true"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload QA videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-videos
+          path: /tmp/qa-videos/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Report AI cost
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
+
+      - name: Notify on qa-execute failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUMBER: ${{ needs.triage.outputs.number }}
+          KIND: ${{ needs.triage.outputs.kind }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ "$KIND" = "pr" ]; then
+            gh pr comment "$NUMBER" --repo ${{ github.repository }} --body "QA testing failed. See the [run logs]($RUN_URL). This does not block the PR — review the dev changes independently."
+          else
+            gh issue comment "$NUMBER" --repo ${{ github.repository }} --body "QA testing failed. See the [run logs]($RUN_URL). The dev track may have succeeded — check the PR."
           fi
