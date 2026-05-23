@@ -20,20 +20,18 @@ An independent QA track that shadows the `sf-ticket-to-pr` dev workflow. It gene
 graph LR
     T[triage] -->|proceed=true| E[execute]
     T -->|proceed=true| QP[qa-plan]
-    E --> QX[qa-execute]
-    QP --> QX
-    QX --> R[QA report on PR]
+    QP -.->|test-plan artifact| E
+    E --> R[QA report on PR]
 
     style T fill:#f9f,stroke:#333
     style E fill:#bbf,stroke:#333
     style QP fill:#bfb,stroke:#333
-    style QX fill:#bfb,stroke:#333
     style R fill:#ff9,stroke:#333
 ```
 
-`execute` and `qa-plan` run **in parallel** after triage. `qa-execute` waits for **both** to finish — it needs the deployed code (from execute) and the test plan (from qa-plan).
+`execute` and `qa-plan` run **in parallel** after triage. After dev work completes, the execute job polls for the test plan artifact from qa-plan, then runs QA tests inline using the same scratch org session — no separate job needed.
 
-The QA track is purely additive — zero edits to the existing triage or execute jobs.
+The triage job is unchanged. The execute job now handles both dev work and QA testing.
 
 ---
 
@@ -50,19 +48,15 @@ Reads the issue requirements and triage plan comment, detects which Salesforce m
 
 **Outputs**: `test-plan` artifact (Markdown file uploaded via `actions/upload-artifact`)
 
-### qa-execute
+### execute (QA phase)
 
-**Trigger**: both `execute` and `qa-plan` succeeded
-**Runs on**: `ubuntu-latest` with SF CLI + Playwright Chromium
-**Duration**: ~15-30 minutes
-**Model**: `claude-sonnet-4-6`, 90 max-turns
-**Concurrency**: `scratch-org-${{ scratch_key }}` (same group as execute — never runs concurrently against the same org)
+After the dev work completes, the execute job polls for the `test-plan` artifact from qa-plan (30s interval, 10 min timeout). Once downloaded, it runs a second `claude-code-action` invocation with the qa-run and qa-eval skills:
 
-Downloads the test plan, restores the scratch org from cache, then runs three phases:
-
-1. **Data tests** (Phase 1) — Creates test data via `sf data create record`, triggers automations via DML, asserts outcomes via SOQL queries. Fast (~2-5 seconds per scenario).
+1. **Data tests** (Phase 1) — Creates test data via `sf data create record`, triggers automations via DML, asserts outcomes via SOQL queries. Uses the same scratch org already authenticated for dev work.
 2. **E2E tests** (Phase 2) — Logs into the scratch org via frontdoor URL, drives the Lightning UI with Playwright, captures screenshots at assertion points. Skipped if >50% of data tests failed.
 3. **Evaluation** (Phase 3) — Compares actual vs expected, groups failures by root cause, classifies severity, generates the QA report, posts it on the PR/issue.
+
+QA failures are **advisory** — they produce warning annotations but don't fail the execute job. The job only fails if dev work failed.
 
 **Outputs**: `qa-screenshots` artifact, QA report comment on PR/issue, `qa-findings` label if failures found
 
@@ -117,7 +111,7 @@ Located in `.claude/skills/_qa-shared/`:
 | Artifact | Produced by | Contents | Retention |
 |----------|-------------|----------|-----------|
 | `test-plan` | qa-plan | Markdown file with metadata, DT-NNN data scenarios, ET-NNN e2e scenarios | 30 days |
-| `qa-screenshots` | qa-execute | PNG screenshots from Playwright e2e tests (one per assertion point) | 30 days |
+| `qa-screenshots` | execute (QA phase) | PNG screenshots from Playwright e2e tests (one per assertion point) | 30 days |
 
 Both are downloadable from the GitHub Actions run page.
 
@@ -185,23 +179,25 @@ All configuration is in [.github/workflows/sf-ticket-to-pr.yml](.github/workflow
 | Setting | Job | Current value | Where to change |
 |---------|-----|---------------|-----------------|
 | Model | qa-plan | `claude-sonnet-4-6` | `claude_args` in qa-plan job |
-| Model | qa-execute | `claude-sonnet-4-6` | `claude_args` in qa-execute job |
+| Model | execute (QA) | `claude-sonnet-4-6` | `claude_args` in "Run QA tests" step |
 | Max turns | qa-plan | 15 | `claude_args` in qa-plan job |
-| Max turns | qa-execute | 90 | `claude_args` in qa-execute job |
-| Screenshot retention | qa-execute | 30 days | `retention-days` in Upload QA screenshots step |
+| Max turns | execute (dev) | 90 | `claude_args` in "Do the work" step |
+| Max turns | execute (QA) | 90 | `claude_args` in "Run QA tests" step |
+| Poll timeout | execute | 600s (10 min) | `MAX_WAIT` in "Poll for test plan" step |
+| Poll interval | execute | 30s | `INTERVAL` in "Poll for test plan" step |
+| Screenshot retention | execute | 30 days | `retention-days` in Upload QA screenshots step |
 | Test plan retention | qa-plan | 30 days | `retention-days` in Upload test plan artifact step |
-| Concurrency group | qa-execute | `scratch-org-${{ scratch_key }}` | `concurrency.group` in qa-execute job |
 
 ### Cost
 
-Each `@butler` mention triggers up to 4 Claude invocations:
+Each `@butler` mention triggers up to 3 Claude invocations:
 
 | Job | Typical cost | Tokens |
 |-----|-------------|--------|
 | triage | ~$0.10 | ~200K |
 | qa-plan | ~$0.80 | ~1.5M |
-| execute | ~$2.50 | ~5M |
-| qa-execute | ~$2.30 | ~2M |
+| execute (dev) | ~$2.50 | ~5M |
+| execute (QA) | ~$2.30 | ~2M |
 | **Total** | **~$5.70** | **~8.7M** |
 
-Costs vary by issue complexity. The triage job is cheap — if it refuses or asks for clarification, only ~$0.10 is spent.
+Costs vary by issue complexity. The triage job is cheap — if it refuses or asks for clarification, only ~$0.10 is spent. QA costs are only incurred if qa-plan produces a valid test plan.
