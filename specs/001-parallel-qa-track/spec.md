@@ -90,7 +90,7 @@ The QA track uses polymorphic type modules (`_qa-types/`) so that each Salesforc
 
 - **FR-001**: System MUST run qa-plan in parallel with the dev execute job after triage outputs `proceed=true`, with no dependency between them.
 - **FR-002**: System MUST generate test scenarios from the GitHub issue body and triage plan comment, not from the deployed implementation.
-- **FR-003**: System MUST infer Salesforce metadata types (Flow, Prompt Template, Agentforce, Apex) from issue text without requiring org access during planning.
+- **FR-003**: System MUST infer Salesforce metadata types (Flow, Prompt Template, Agentforce) from issue text without requiring org access during planning. Apex detection is supported but deferred to a future iteration for type-specific modules.
 - **FR-004**: System MUST load type-specific planning modules from `_qa-types/<type>/plan.md` based on detected types.
 - **FR-005**: System MUST upload the full test plan as a GitHub Actions artifact for downstream consumption by qa-execute.
 - **FR-006**: System MUST wait for both the dev execute job and qa-plan to succeed before starting qa-execute.
@@ -135,5 +135,5 @@ The QA track uses polymorphic type modules (`_qa-types/`) so that each Salesforc
 - The `sf-ticket-to-pr` workflow already has a working triage job that outputs `proceed=true` and a working execute job that deploys to a scratch org.
 - Playwright and the Salesforce CLI are available or installable on the GitHub Actions runner used by qa-execute.
 - QA findings will initially be report-only (posted on PR for human review). Auto-fix and re-trigger-dev modes are deferred to a future iteration.
-- The test plan comment on the issue is opt-in for the initial version to avoid noise; it can be enabled by configuration.
+- The test plan summary comment on the issue (FR-018) is always posted in v1. If noise becomes a concern, a configuration toggle can be added later.
 - Cost budget constraints (max-turns, model selection) will be defined during implementation planning, not in this spec.
