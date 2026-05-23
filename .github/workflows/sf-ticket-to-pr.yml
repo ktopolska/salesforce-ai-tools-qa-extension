@@ -373,6 +373,10 @@ jobs:
           echo "qa-plan-ready=false" >> $GITHUB_OUTPUT
           echo "::warning::Test plan artifact not found after ${MAX_WAIT}s — skipping QA"
 
+      - name: Pre-install Playwright for QA scripts
+        if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
+        run: npm install --no-save playwright
+
       - name: Run QA tests and evaluate
         if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
         uses: anthropics/claude-code-action@v1
