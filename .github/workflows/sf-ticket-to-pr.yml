@@ -328,8 +328,7 @@ jobs:
             Read the full thread for context (`gh ${{ env.KIND == 'pr' && 'pr' || 'issue' }} view ${{ env.NUMBER }} --repo ${{ github.repository }} --comments`).
 
             Tone for human-facing text: strong opinions, no "Great question!" or "I'd be happy to help!", brevity mandatory, no emojis, call out anything unclear or risky.
-          claude_args: "--max-turns 90 --model claude-sonnet-4-6 --mcp-config ~/.claude/mcp.json"
-          allowed_tools: "Bash,Read,Write,Edit,mcp__playwright*"
+          claude_args: "--max-turns 90 --model claude-sonnet-4-6"
           show_full_output: "true"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -500,10 +499,13 @@ jobs:
             After execution, read ~/.claude/skills/qa-eval/SKILL.md and evaluate the results.
             Post the QA report on PR for issue #${{ env.NUMBER }} in ${{ github.repository }}.
 
-            IMPORTANT: Save all screenshots to /tmp/qa-screenshots/ (create the directory first).
-            After posting the report, commit screenshots to .verification/qa/ on the current branch and push.
-          claude_args: "--max-turns 90 --model claude-sonnet-4-6 --mcp-config ~/.claude/mcp.json"
-          allowed_tools: "Bash,Read,Write,Edit,mcp__playwright*"
+            IMPORTANT for screenshots:
+            1. Run: mkdir -p /tmp/qa-screenshots
+            2. During E2E tests, save every Playwright screenshot to /tmp/qa-screenshots/<scenario-id>.png
+            3. Use browser_take_screenshot with savePath="/tmp/qa-screenshots/ET-001.png" etc.
+            4. After posting the report, also commit screenshots: cp /tmp/qa-screenshots/*.png .verification/qa/ && git add .verification/qa/ && git commit -m "qa: screenshots for issue #${{ env.NUMBER }}" && git push
+          claude_args: "--max-turns 90 --model claude-sonnet-4-6"
+          additional_permissions: "Bash(git*),Bash(cp*),Bash(mkdir*)"
           show_full_output: "true"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
