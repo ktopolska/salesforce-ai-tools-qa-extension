@@ -395,7 +395,7 @@ jobs:
             3. Use browser_take_screenshot with savePath="/tmp/qa-screenshots/ET-001.png" etc.
             4. After posting the report, also commit screenshots: cp /tmp/qa-screenshots/*.png .verification/qa/ && git add .verification/qa/ && git commit -m "qa: screenshots for issue #${{ env.NUMBER }}" && git push
           claude_args: "--max-turns 90 --model claude-sonnet-4-6"
-          additional_permissions: "Bash(git*),Bash(cp*),Bash(mkdir*)"
+          additional_permissions: "Bash(git*),Bash(cp*),Bash(mkdir*),Bash(node*),Bash(npm*),Bash(npx*),Bash(find*)"
           show_full_output: "true"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
