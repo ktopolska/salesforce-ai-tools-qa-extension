@@ -26,11 +26,11 @@
 
 **Purpose**: Create the skill directory structure and shared QA modules
 
-- [ ] T001 Create directory structure for QA skills: `.claude/skills/qa-plan/`, `.claude/skills/qa-run/`, `.claude/skills/qa-eval/`, `.claude/skills/_qa-types/{flow,prompt-template,agentforce}/`, `.claude/skills/_qa-shared/`
-- [ ] T002 [P] Create type detection module in `.claude/skills/_qa-shared/type-detection.md` — keyword matching rules for Flow, Prompt Template, Agentforce, Apex with context-awareness rules from research.md R3
-- [ ] T003 [P] Create type registry module in `.claude/skills/_qa-shared/type-registry.md` — maps detected type names to `_qa-types/<type>/` module paths, lists supported types and their module files (plan.md, data.md, run.md, eval.md)
-- [ ] T004 [P] Create SOQL assertion patterns module in `.claude/skills/_qa-shared/sf-assertions.md` — reusable patterns for asserting record state, field values, record counts, and related record existence via SOQL queries and `sf data query`
-- [ ] T005 [P] Create PR reporting module in `.claude/skills/_qa-shared/sf-reporting.md` — QA report Markdown template matching the format in data-model.md, screenshot commit instructions, video artifact upload instructions, `qa-findings` label logic
+- [x] T001 Create directory structure for QA skills: `.claude/skills/qa-plan/`, `.claude/skills/qa-run/`, `.claude/skills/qa-eval/`, `.claude/skills/_qa-types/{flow,prompt-template,agentforce}/`, `.claude/skills/_qa-shared/`
+- [x] T002 [P] Create type detection module in `.claude/skills/_qa-shared/type-detection.md` — keyword matching rules for Flow, Prompt Template, Agentforce, Apex with context-awareness rules from research.md R3
+- [x] T003 [P] Create type registry module in `.claude/skills/_qa-shared/type-registry.md` — maps detected type names to `_qa-types/<type>/` module paths, lists supported types and their module files (plan.md, data.md, run.md, eval.md)
+- [x] T004 [P] Create SOQL assertion patterns module in `.claude/skills/_qa-shared/sf-assertions.md` — reusable patterns for asserting record state, field values, record counts, and related record existence via SOQL queries and `sf data query`
+- [x] T005 [P] Create PR reporting module in `.claude/skills/_qa-shared/sf-reporting.md` — QA report Markdown template matching the format in data-model.md, screenshot commit instructions, video artifact upload instructions, `qa-findings` label logic
 
 ---
 
@@ -50,11 +50,11 @@
 
 ### Implementation for User Story 1
 
-- [ ] T006 [P] [US1] Create Flow planning module in `.claude/skills/_qa-types/flow/plan.md` — Flow-specific scenario patterns: record-triggered DML, boundary conditions (field values at thresholds), before/after save triggers, bulkification scenarios
-- [ ] T007 [P] [US1] Create Prompt Template planning module in `.claude/skills/_qa-types/prompt-template/plan.md` — API invocation scenarios, input variation testing, output format validation, token limit edge cases
-- [ ] T008 [P] [US1] Create Agentforce planning module in `.claude/skills/_qa-types/agentforce/plan.md` — multi-turn conversation scenarios, topic routing, action invocation, escalation paths, context grounding checks
-- [ ] T009 [US1] Create qa-plan skill in `.claude/skills/qa-plan/SKILL.md` — reads issue body via `gh issue view`, reads triage plan comment, invokes `_qa-shared/type-detection.md` to detect types, loads `_qa-types/<type>/plan.md` for each detected type, generates test plan following the contract in `contracts/test-plan-schema.md`, posts summary comment on issue, outputs test plan file
-- [ ] T010 [US1] Add `qa-plan` job to `.github/workflows/sf-ticket-to-pr.yml` — `needs: triage`, `if: needs.triage.outputs.proceed == 'true'`, runs on `ubuntu-latest`, no scratch org, checkouts repo + salesforce-ai-tools, installs skills, invokes Claude with qa-plan skill prompt, uploads test plan as `test-plan` artifact via `actions/upload-artifact@v4`
+- [x] T006 [P] [US1] Create Flow planning module in `.claude/skills/_qa-types/flow/plan.md` — Flow-specific scenario patterns: record-triggered DML, boundary conditions (field values at thresholds), before/after save triggers, bulkification scenarios
+- [x] T007 [P] [US1] Create Prompt Template planning module in `.claude/skills/_qa-types/prompt-template/plan.md` — API invocation scenarios, input variation testing, output format validation, token limit edge cases
+- [x] T008 [P] [US1] Create Agentforce planning module in `.claude/skills/_qa-types/agentforce/plan.md` — multi-turn conversation scenarios, topic routing, action invocation, escalation paths, context grounding checks
+- [x] T009 [US1] Create qa-plan skill in `.claude/skills/qa-plan/SKILL.md` — reads issue body via `gh issue view`, reads triage plan comment, invokes `_qa-shared/type-detection.md` to detect types, loads `_qa-types/<type>/plan.md` for each detected type, generates test plan following the contract in `contracts/test-plan-schema.md`, posts summary comment on issue, outputs test plan file
+- [x] T010 [US1] Add `qa-plan` job to `.github/workflows/sf-ticket-to-pr.yml` — `needs: triage`, `if: needs.triage.outputs.proceed == 'true'`, runs on `ubuntu-latest`, no scratch org, checkouts repo + salesforce-ai-tools, installs skills, invokes Claude with qa-plan skill prompt, uploads test plan as `test-plan` artifact via `actions/upload-artifact@v4`
 
 **Checkpoint**: qa-plan job runs in parallel with execute, produces a test plan artifact from issue requirements.
 
@@ -68,14 +68,14 @@
 
 ### Implementation for User Story 2
 
-- [ ] T011 [P] [US2] Create Flow data testing module in `.claude/skills/_qa-types/flow/data.md` — record creation patterns via `sf data create record`, DML triggers for Flow activation, bulk data import for bulkification testing
-- [ ] T012 [P] [US2] Create Flow run module in `.claude/skills/_qa-types/flow/run.md` — SOQL assertion patterns for Flow outcomes, Playwright navigation to Flow-affected records, screenshot capture at assertion points
-- [ ] T013 [P] [US2] Create Prompt Template data testing module in `.claude/skills/_qa-types/prompt-template/data.md` — test input data creation, API authentication setup for template invocation
-- [ ] T014 [P] [US2] Create Prompt Template run module in `.claude/skills/_qa-types/prompt-template/run.md` — API invocation via `sf apex run`, output quality assertions, response format validation
-- [ ] T015 [P] [US2] Create Agentforce data testing module in `.claude/skills/_qa-types/agentforce/data.md` — agent configuration verification, test data for conversation scenarios, knowledge article setup
-- [ ] T016 [P] [US2] Create Agentforce run module in `.claude/skills/_qa-types/agentforce/run.md` — multi-turn conversation execution via Agent Runtime API, session trace extraction, topic/action coverage assertions
-- [ ] T017 [US2] Create qa-run skill in `.claude/skills/qa-run/SKILL.md` — downloads test plan artifact, loads `_qa-shared/sf-assertions.md`, executes Phase 1 (data tests): for each DT-NNN scenario, creates test data, triggers actions, asserts via SOQL using type-specific `data.md` and `run.md` modules; executes Phase 2 (e2e tests): logs into scratch org via frontdoor URL, for each ET-NNN scenario, navigates Playwright, records video (`recordVideo: { dir: '/tmp/qa-videos/' }`), captures screenshots at marked points; skips Phase 2 if Phase 1 has critical failures
-- [ ] T018 [US2] Add `qa-execute` job to `.github/workflows/sf-ticket-to-pr.yml` — `needs: [execute, qa-plan]`, `if: needs.execute.result == 'success' && needs.qa-plan.result == 'success'`, runs on `ubuntu-latest`, `concurrency: { group: scratch-org-${{ needs.triage.outputs.scratch_key }} }`, checkouts PR branch, installs SF CLI + Playwright Chromium, restores scratch org from cache, downloads `test-plan` artifact, invokes Claude with qa-run then qa-eval skill prompts, `--max-turns 45 --model claude-sonnet-4-6`
+- [x] T011 [P] [US2] Create Flow data testing module in `.claude/skills/_qa-types/flow/data.md` — record creation patterns via `sf data create record`, DML triggers for Flow activation, bulk data import for bulkification testing
+- [x] T012 [P] [US2] Create Flow run module in `.claude/skills/_qa-types/flow/run.md` — SOQL assertion patterns for Flow outcomes, Playwright navigation to Flow-affected records, screenshot capture at assertion points
+- [x] T013 [P] [US2] Create Prompt Template data testing module in `.claude/skills/_qa-types/prompt-template/data.md` — test input data creation, API authentication setup for template invocation
+- [x] T014 [P] [US2] Create Prompt Template run module in `.claude/skills/_qa-types/prompt-template/run.md` — API invocation via `sf apex run`, output quality assertions, response format validation
+- [x] T015 [P] [US2] Create Agentforce data testing module in `.claude/skills/_qa-types/agentforce/data.md` — agent configuration verification, test data for conversation scenarios, knowledge article setup
+- [x] T016 [P] [US2] Create Agentforce run module in `.claude/skills/_qa-types/agentforce/run.md` — multi-turn conversation execution via Agent Runtime API, session trace extraction, topic/action coverage assertions
+- [x] T017 [US2] Create qa-run skill in `.claude/skills/qa-run/SKILL.md` — downloads test plan artifact, loads `_qa-shared/sf-assertions.md`, executes Phase 1 (data tests): for each DT-NNN scenario, creates test data, triggers actions, asserts via SOQL using type-specific `data.md` and `run.md` modules; executes Phase 2 (e2e tests): logs into scratch org via frontdoor URL, for each ET-NNN scenario, navigates Playwright, records video (`recordVideo: { dir: '/tmp/qa-videos/' }`), captures screenshots at marked points; skips Phase 2 if Phase 1 has critical failures
+- [x] T018 [US2] Add `qa-execute` job to `.github/workflows/sf-ticket-to-pr.yml` — `needs: [execute, qa-plan]`, `if: needs.execute.result == 'success' && needs.qa-plan.result == 'success'`, runs on `ubuntu-latest`, `concurrency: { group: scratch-org-${{ needs.triage.outputs.scratch_key }} }`, checkouts PR branch, installs SF CLI + Playwright Chromium, restores scratch org from cache, downloads `test-plan` artifact, invokes Claude with qa-run then qa-eval skill prompts, `--max-turns 45 --model claude-sonnet-4-6`
 
 **Checkpoint**: qa-execute runs data + e2e tests, produces results with screenshots and video.
 
@@ -89,11 +89,11 @@
 
 ### Implementation for User Story 3
 
-- [ ] T019 [P] [US3] Create Flow eval module in `.claude/skills/_qa-types/flow/eval.md` — root cause analysis patterns for Flow failures (missing criteria, wrong field updates, order-of-execution issues), fix suggestions
-- [ ] T020 [P] [US3] Create Prompt Template eval module in `.claude/skills/_qa-types/prompt-template/eval.md` — output quality analysis, hallucination detection patterns, template variable resolution failures
-- [ ] T021 [P] [US3] Create Agentforce eval module in `.claude/skills/_qa-types/agentforce/eval.md` — conversation quality analysis, topic misrouting detection, action failure classification
-- [ ] T022 [US3] Create qa-eval skill in `.claude/skills/qa-eval/SKILL.md` — loads `_qa-shared/sf-reporting.md`, loads type-specific `eval.md` modules, compares actual vs expected for all scenarios, groups failures by root cause, classifies severity (Critical/High/Medium/Low), generates QA report Markdown per data-model.md format, posts report as PR comment via `gh pr comment`, commits screenshots to `.verification/qa/` on PR branch via `git add && git commit && git push`, uploads `/tmp/qa-videos/` as Actions artifact `qa-videos` via `actions/upload-artifact@v4`, adds `qa-findings` label if any failures via `gh pr edit --add-label`
-- [ ] T023 [US3] Wire qa-eval invocation into the `qa-execute` job in `.github/workflows/sf-ticket-to-pr.yml` — add cost reporting step (reuse `report-ai-cost.sh`), add failure notification step matching execute job pattern
+- [x] T019 [P] [US3] Create Flow eval module in `.claude/skills/_qa-types/flow/eval.md` — root cause analysis patterns for Flow failures (missing criteria, wrong field updates, order-of-execution issues), fix suggestions
+- [x] T020 [P] [US3] Create Prompt Template eval module in `.claude/skills/_qa-types/prompt-template/eval.md` — output quality analysis, hallucination detection patterns, template variable resolution failures
+- [x] T021 [P] [US3] Create Agentforce eval module in `.claude/skills/_qa-types/agentforce/eval.md` — conversation quality analysis, topic misrouting detection, action failure classification
+- [x] T022 [US3] Create qa-eval skill in `.claude/skills/qa-eval/SKILL.md` — loads `_qa-shared/sf-reporting.md`, loads type-specific `eval.md` modules, compares actual vs expected for all scenarios, groups failures by root cause, classifies severity (Critical/High/Medium/Low), generates QA report Markdown per data-model.md format, posts report as PR comment via `gh pr comment`, commits screenshots to `.verification/qa/` on PR branch via `git add && git commit && git push`, uploads `/tmp/qa-videos/` as Actions artifact `qa-videos` via `actions/upload-artifact@v4`, adds `qa-findings` label if any failures via `gh pr edit --add-label`
+- [x] T023 [US3] Wire qa-eval invocation into the `qa-execute` job in `.github/workflows/sf-ticket-to-pr.yml` — add cost reporting step (reuse `report-ai-cost.sh`), add failure notification step matching execute job pattern
 
 **Checkpoint**: Full QA pipeline functional — qa-plan → qa-execute (data + e2e + eval) → QA report on PR.
 
@@ -107,9 +107,9 @@
 
 ### Implementation for User Story 4
 
-- [ ] T024 [US4] Review and enrich Flow modules — verify `.claude/skills/_qa-types/flow/{plan,data,run,eval}.md` cover: record-triggered vs scheduled vs autolaunched, decision element boundary conditions, loop element scenarios, subflow invocations, platform event triggers
-- [ ] T025 [US4] Review and enrich Prompt Template modules — verify `.claude/skills/_qa-types/prompt-template/{plan,data,run,eval}.md` cover: different template types (flex, field-gen, record-summary), merge field resolution, multi-language scenarios, token budget testing
-- [ ] T026 [US4] Review and enrich Agentforce modules — verify `.claude/skills/_qa-types/agentforce/{plan,data,run,eval}.md` cover: multi-topic agents, custom actions vs standard actions, grounding with Data Cloud, channel-specific behavior (web vs Slack vs API)
+- [x] T024 [US4] Review and enrich Flow modules — verify `.claude/skills/_qa-types/flow/{plan,data,run,eval}.md` cover: record-triggered vs scheduled vs autolaunched, decision element boundary conditions, loop element scenarios, subflow invocations, platform event triggers
+- [x] T025 [US4] Review and enrich Prompt Template modules — verify `.claude/skills/_qa-types/prompt-template/{plan,data,run,eval}.md` cover: different template types (flex, field-gen, record-summary), merge field resolution, multi-language scenarios, token budget testing
+- [x] T026 [US4] Review and enrich Agentforce modules — verify `.claude/skills/_qa-types/agentforce/{plan,data,run,eval}.md` cover: multi-topic agents, custom actions vs standard actions, grounding with Data Cloud, channel-specific behavior (web vs Slack vs API)
 
 **Checkpoint**: All type modules fully enriched with domain-specific testing patterns.
 
@@ -119,9 +119,9 @@
 
 **Purpose**: Documentation, cost optimization, and workflow hardening
 
-- [ ] T027 [P] Update `scripts/install-sf-ai-tools.sh` if needed — verify it already symlinks `qa-plan/`, `qa-run/`, `qa-eval/`, `_qa-types/`, `_qa-shared/` (it should, since it symlinks all skills via wildcard)
-- [ ] T028 [P] Add `qa-plan` and `qa-execute` job failure notification steps to `.github/workflows/sf-ticket-to-pr.yml` — post comment on issue/PR when QA jobs fail (matching existing triage/execute failure notification pattern)
-- [ ] T029 [P] Document the QA pipeline in `docs/qa-pipeline.md` — architecture overview, how to add new type modules, cost expectations, troubleshooting guide
+- [x] T027 [P] Update `scripts/install-sf-ai-tools.sh` if needed — verify it already symlinks `qa-plan/`, `qa-run/`, `qa-eval/`, `_qa-types/`, `_qa-shared/` (it should, since it symlinks all skills via wildcard)
+- [x] T028 [P] Add `qa-plan` and `qa-execute` job failure notification steps to `.github/workflows/sf-ticket-to-pr.yml` — post comment on issue/PR when QA jobs fail (matching existing triage/execute failure notification pattern)
+- [x] T029 [P] Document the QA pipeline in `docs/qa-pipeline.md` — architecture overview, how to add new type modules, cost expectations, troubleshooting guide
 - [ ] T030 Run end-to-end validation — create a test issue with `@butler` mention, observe full pipeline (triage → execute + qa-plan → qa-execute), verify QA report on PR
 
 ---
