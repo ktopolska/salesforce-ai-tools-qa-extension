@@ -328,7 +328,7 @@ jobs:
             Read the full thread for context (`gh ${{ env.KIND == 'pr' && 'pr' || 'issue' }} view ${{ env.NUMBER }} --repo ${{ github.repository }} --comments`).
 
             Tone for human-facing text: strong opinions, no "Great question!" or "I'd be happy to help!", brevity mandatory, no emojis, call out anything unclear or risky.
-          claude_args: "--max-turns 90 --model claude-sonnet-4-6 --mcp-config ~/.claude/mcp.json --permission-mode bypassPermissions"
+          claude_args: "--max-turns 90 --model claude-sonnet-4-6"
           show_full_output: "true"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -498,7 +498,7 @@ jobs:
 
             After execution, read ~/.claude/skills/qa-eval/SKILL.md and evaluate the results.
             Post the QA report on PR for issue #${{ env.NUMBER }} in ${{ github.repository }}.
-          claude_args: "--max-turns 45 --model claude-sonnet-4-6 --mcp-config ~/.claude/mcp.json --permission-mode bypassPermissions"
+          claude_args: "--max-turns 45 --model claude-sonnet-4-6"
           show_full_output: "true"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
