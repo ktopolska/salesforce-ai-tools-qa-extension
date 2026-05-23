@@ -498,7 +498,7 @@ jobs:
 
             After execution, read ~/.claude/skills/qa-eval/SKILL.md and evaluate the results.
             Post the QA report on PR for issue #${{ env.NUMBER }} in ${{ github.repository }}.
-          claude_args: "--max-turns 45 --model claude-sonnet-4-6"
+          claude_args: "--max-turns 90 --model claude-sonnet-4-6"
           show_full_output: "true"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
