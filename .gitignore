@@ -9,3 +9,6 @@ node_modules/
 
 # Scratch org auth cache
 /tmp/sfdx-auth-*.url
+
+# spec-kit scaffolding (installed globally, not project-specific)
+.specify/
