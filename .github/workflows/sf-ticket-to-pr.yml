@@ -328,7 +328,8 @@ jobs:
             Read the full thread for context (`gh ${{ env.KIND == 'pr' && 'pr' || 'issue' }} view ${{ env.NUMBER }} --repo ${{ github.repository }} --comments`).
 
             Tone for human-facing text: strong opinions, no "Great question!" or "I'd be happy to help!", brevity mandatory, no emojis, call out anything unclear or risky.
-          claude_args: "--max-turns 90 --model claude-sonnet-4-6"
+          claude_args: "--max-turns 90 --model claude-sonnet-4-6 --mcp-config ~/.claude/mcp.json"
+          allowed_tools: "Bash,Read,Write,Edit,mcp__playwright*"
           show_full_output: "true"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -498,11 +499,24 @@ jobs:
 
             After execution, read ~/.claude/skills/qa-eval/SKILL.md and evaluate the results.
             Post the QA report on PR for issue #${{ env.NUMBER }} in ${{ github.repository }}.
-          claude_args: "--max-turns 90 --model claude-sonnet-4-6"
+
+            IMPORTANT: Save all screenshots to /tmp/qa-screenshots/ (create the directory first).
+            After posting the report, commit screenshots to .verification/qa/ on the current branch and push.
+          claude_args: "--max-turns 90 --model claude-sonnet-4-6 --mcp-config ~/.claude/mcp.json"
+          allowed_tools: "Bash,Read,Write,Edit,mcp__playwright*"
           show_full_output: "true"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload QA screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-screenshots
+          path: /tmp/qa-screenshots/
+          retention-days: 30
+          if-no-files-found: ignore
 
       - name: Upload QA videos
         if: always()
