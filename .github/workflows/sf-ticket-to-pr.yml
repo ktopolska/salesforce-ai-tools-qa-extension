@@ -264,10 +264,8 @@ jobs:
       pull-requests: write
     steps:
       # Issue path: branch off main. PR path: check out the PR's head branch.
-      # Both use full history so the agent can read prior commits if needed.
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
           ref: ${{ needs.triage.outputs.kind == 'pr' && needs.triage.outputs.pr_branch || '' }}
 
       - name: Checkout salesforce-ai-tools (skills + scripts)
@@ -448,7 +446,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0
           ref: ${{ needs.triage.outputs.pr_branch }}
 
       - name: Checkout salesforce-ai-tools (skills + scripts)
