@@ -1,10 +1,10 @@
 # QA Reporting Module
 
-Generates the QA report, posts it to the PR, commits screenshots, uploads videos, and manages labels. Used by qa-eval after test execution.
+Generates the QA report, posts it to the PR or issue, and manages labels. Used by qa-eval after test execution.
 
 ## QA Report Template
 
-Post this as a PR comment via `gh pr comment <number> --repo <repo> --body-file /tmp/qa-report.md`:
+Post this as a comment via `gh pr comment` or `gh issue comment`:
 
 ```markdown
 ## QA Report — Issue #<number>
@@ -17,9 +17,12 @@ Post this as a PR comment via `gh pr comment <number> --repo <repo> --body-file 
 | DT-001 | <title> | PASS/FAIL | <assertion detail or "all assertions passed"> |
 
 ### E2E Tests
+
+Screenshots available in the [Actions artifacts](<run-url>)
+
 | # | Scenario | Result | Screenshot | Details |
 |---|----------|--------|------------|---------|
-| ET-001 | <title> | PASS/FAIL | [view](<link>) | <detail> |
+| ET-001 | <title> | PASS/FAIL | see artifacts | <detail> |
 
 ### Failures
 _(omit this section if all tests passed)_
@@ -28,39 +31,22 @@ _(omit this section if all tests passed)_
 **Severity**: Critical/High/Medium/Low
 **Scenarios**: DT-002, ET-003
 **Summary**: <what went wrong and likely why>
-**Evidence**: <screenshot links, SOQL results>
+**Evidence**: <SOQL results, screenshot references>
 ```
 
 ## Screenshot Management
 
-Commit screenshots to the PR branch:
+Screenshots are uploaded as GitHub Actions artifacts by the workflow. They are accessible from the Actions run page for 30 days.
 
-```bash
-mkdir -p .verification/qa/
-cp /tmp/qa-screenshots/*.png .verification/qa/
-git add .verification/qa/
-git commit -m "qa: add test screenshots for issue #<number>"
-git push
-```
+In the report, link to screenshots using the artifact page URL:
+- E2E section header: `Screenshots available in the [Actions artifacts](<run-url>)`
+- Individual E2E rows: use `see artifacts` in the Screenshot column
 
-Reference screenshots in the report using relative paths:
-`[view](.verification/qa/<filename>.png)`
-
-## Video Upload
-
-Videos are too large for git. Upload as GitHub Actions artifacts within the workflow step:
-
-```yaml
-- uses: actions/upload-artifact@v4
-  with:
-    name: qa-videos
-    path: /tmp/qa-videos/
-    retention-days: 30
-```
-
-Link in the report: "Videos available in the [Actions artifacts](<run-url>)."
+Do NOT use relative paths like `[view](.verification/qa/<filename>.png)` — they do not work in issue comments.
 
 ## Label Management
+
+### `qa-findings` label
 
 If any test failed, add the `qa-findings` label:
 
@@ -72,6 +58,20 @@ If all tests passed and the label exists from a previous run, remove it:
 
 ```bash
 gh pr edit <number> --repo <repo> --remove-label "qa-findings" 2>/dev/null || true
+```
+
+### `qa-fix-needed` label
+
+If any failure has a **code-level** root cause (wrong logic, missing field, broken automation — NOT environment issues like org timeout, session expired, or Playwright flakiness):
+
+```bash
+gh issue edit <number> --repo <repo> --add-label "qa-fix-needed"
+```
+
+If all tests passed and the label exists from a previous run, remove it:
+
+```bash
+gh issue edit <number> --repo <repo> --remove-label "qa-fix-needed" 2>/dev/null || true
 ```
 
 ## Cost Reporting

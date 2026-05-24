@@ -39,37 +39,56 @@ RESULT=$(sf data update record --sobject <Object> --record-id <id> --values "<Tr
 
 ## Phase 2: Playwright E2E
 
-### Navigate to Record
+Write ONE `.mjs` script for ALL E2E scenarios. Use the patterns below.
 
-```javascript
-// Go to the record page where the Flow's effects should be visible
-await page.goto(`${instanceUrl}/lightning/r/<Object>/<recordId>/view`);
-await page.waitForSelector('records-record-layout-section');
+### Playwright Patterns
+
+#### Login via Frontdoor URL
+```js
+await page.goto(frontdoorUrl);
+await page.waitForFunction(() => {
+  return document.title !== '' && !document.title.includes('Login');
+}, { timeout: 30000 });
 ```
 
-### Verify Field on Record Page
-
-```javascript
-// Check that a field updated by the Flow shows the expected value
-const fieldValue = await page.locator('lightning-formatted-text').filter({ hasText: '<expected>' }).textContent();
+#### Navigate to Record Page
+```js
+await page.goto(`${instanceUrl}/lightning/r/${objectName}/${recordId}/view`);
+await page.waitForFunction(() => {
+  return document.querySelector('records-highlights-details') !== null
+    || document.querySelector('records-record-layout-section') !== null;
+}, { timeout: 30000 });
 ```
 
-### Verify Related List
-
-```javascript
-// Check that a child record created by the Flow appears in the related list
-await page.locator('lst-related-list-single-container').filter({ hasText: '<RelatedListLabel>' }).click();
-await page.waitForSelector('lightning-datatable');
-const rows = await page.locator('lightning-datatable tbody tr').count();
+#### Verify Field Value on Record Page
+```js
+const fieldVisible = await page.getByText(expectedValue).isVisible({ timeout: 10000 });
 ```
 
-### Screenshot Points
+#### Verify Related List Has Records
+```js
+const relatedList = page.getByRole('heading', { name: relatedListLabel }).locator('..');
+await relatedList.scrollIntoViewIfNeeded();
+const rows = await relatedList.locator('a[data-refid="recordId"]').count();
+```
 
-Capture screenshots at:
-1. Record page after triggering the Flow (shows field updates)
-2. Related list showing created child records
-3. Error message display (for negative tests)
+#### Screenshot at Assertion Point
+```js
+await page.screenshot({ path: `/tmp/qa-screenshots/${scenarioId}.png`, fullPage: false });
+```
 
-```javascript
-await page.screenshot({ path: '/tmp/qa-screenshots/<scenario-id>.png', fullPage: false });
+#### Error Scenario — Verify Error Message
+```js
+const errorBanner = page.getByRole('alert');
+const errorText = await errorBanner.textContent();
+```
+
+#### Try/Catch Wrapper Per Scenario
+```js
+try {
+  // Navigate, assert, screenshot
+} catch (err) {
+  await page.screenshot({ path: `/tmp/qa-screenshots/${scenarioId}-error.png` });
+  results.push({ id: scenarioId, result: 'FAIL', details: err.message });
+}
 ```

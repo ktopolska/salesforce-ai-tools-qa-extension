@@ -64,35 +64,67 @@ sf data query --query "SELECT Id, EventType, Payload FROM AgentSessionTrace WHER
 
 ## Phase 2: Playwright E2E
 
-### Open Agent Panel
+Write ONE `.mjs` script for ALL E2E scenarios. Use the patterns below.
 
-```javascript
-// Navigate to a page with the embedded agent
-await page.goto(`${instanceUrl}/lightning/page/home`);
+### Playwright Patterns
 
-// Open the Agentforce panel
-await page.locator('button[title="Agentforce"]').click();
-await page.waitForSelector('.agent-chat-container', { timeout: 15000 });
+#### Login via Frontdoor URL
+```js
+await page.goto(frontdoorUrl);
+await page.waitForFunction(() => {
+  return document.title !== '' && !document.title.includes('Login');
+}, { timeout: 30000 });
 ```
 
-### Send Message via UI
+#### Open Agentforce Panel
+```js
+await page.goto(`${instanceUrl}/lightning/page/home`);
+await page.waitForFunction(() => {
+  return document.querySelector('records-highlights-details') !== null
+    || document.title.includes('Home');
+}, { timeout: 30000 });
 
-```javascript
-const chatInput = page.locator('.agent-chat-input textarea');
-await chatInput.fill('<utterance>');
+const agentBtn = page.getByRole('button', { name: /agentforce|agent/i });
+await agentBtn.click();
+await page.waitForFunction(() => {
+  return document.querySelector('[class*="agent-chat"]') !== null
+    || document.querySelector('[class*="messaging"]') !== null;
+}, { timeout: 15000 });
+```
+
+#### Send Message and Wait for Response
+```js
+const chatInput = page.getByRole('textbox', { name: /message|type/i });
+await chatInput.fill(utterance);
 await chatInput.press('Enter');
 
-// Wait for agent response
-await page.waitForSelector('.agent-response-message', { timeout: 30000 });
-const responseText = await page.locator('.agent-response-message').last().textContent();
+await page.waitForFunction((prevCount) => {
+  const messages = document.querySelectorAll('[class*="message"], [class*="response"]');
+  return messages.length > prevCount;
+}, messageCountBefore, { timeout: 30000 });
+
+const responseText = await page.locator('[class*="response"], [class*="message"]').last().textContent();
 ```
 
-### Screenshot Points
+#### Navigate to Record After Action
+```js
+await page.goto(`${instanceUrl}/lightning/r/${objectName}/${recordId}/view`);
+await page.waitForFunction(() => {
+  return document.querySelector('records-highlights-details') !== null;
+}, { timeout: 30000 });
+```
 
-1. Agent panel opened (initial state)
-2. After each agent response (shows conversation flow)
-3. Record page after action execution (shows side effects)
+#### Screenshot at Assertion Point
+```js
+await page.screenshot({ path: `/tmp/qa-screenshots/${scenarioId}.png` });
+```
 
-```javascript
-await page.screenshot({ path: '/tmp/qa-screenshots/<scenario-id>.png' });
+#### Try/Catch Wrapper Per Scenario
+```js
+try {
+  // Send message, wait, assert, screenshot
+} catch (err) {
+  await page.screenshot({ path: `/tmp/qa-screenshots/${scenarioId}-error.png` });
+  results.push({ id: scenarioId, result: 'FAIL', details: err.message });
+}
 ```

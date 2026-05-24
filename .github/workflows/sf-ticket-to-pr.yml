@@ -343,43 +343,48 @@ jobs:
         run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
 
       # ─── QA TRACK (inline) ───────────────────────────────────────────
-      # After dev work completes, poll for the test plan artifact from
-      # the parallel qa-plan job, then run QA tests in this same scratch
-      # org session.
+      # After dev work completes, generate a test plan (with org access),
+      # then run QA tests in this same scratch org session.
 
-      - name: Poll for test plan
-        id: poll-test-plan
+      - name: Generate test plan
         if: steps.claude-dev.outcome == 'success'
+        uses: anthropics/claude-code-action@v1
+        id: claude-qa-plan
+        continue-on-error: true
+        with:
+          prompt: |
+            Read ~/.claude/skills/qa-plan/SKILL.md for instructions.
+
+            Generate a test plan for issue #${{ env.NUMBER }} in ${{ github.repository }}.
+            Scratch org alias: ${{ env.SCRATCH_ORG_ALIAS }}
+
+            The triage plan (what the dev agent committed to):
+
+            --- Plan ---
+            ${{ needs.triage.outputs.plan }}
+            --- End plan ---
+          claude_args: "--max-turns 15 --model claude-sonnet-4-6"
+          additional_permissions: "Bash(sf*),Bash(git*)"
+          show_full_output: "true"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Report QA plan AI cost
+        if: steps.claude-qa-plan.outcome != 'skipped'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          MAX_WAIT=600
-          INTERVAL=30
-          elapsed=0
-          while [ $elapsed -lt $MAX_WAIT ]; do
-            ARTIFACT_ID=$(gh api "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
-              --jq '.artifacts[] | select(.name == "test-plan") | .id' 2>/dev/null || true)
-            if [ -n "$ARTIFACT_ID" ]; then
-              gh api "/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID/zip" > /tmp/test-plan.zip
-              unzip -o /tmp/test-plan.zip -d /tmp/
-              echo "qa-plan-ready=true" >> $GITHUB_OUTPUT
-              echo "::notice::Test plan artifact downloaded successfully"
-              exit 0
-            fi
-            echo "Waiting for test-plan artifact... (${elapsed}s / ${MAX_WAIT}s)"
-            sleep $INTERVAL
-            elapsed=$((elapsed + INTERVAL))
-          done
-          echo "qa-plan-ready=false" >> $GITHUB_OUTPUT
-          echo "::warning::Test plan artifact not found after ${MAX_WAIT}s — skipping QA"
+          ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
+          EXECUTION_FILE: ${{ steps.claude-qa-plan.outputs.execution_file }}
+        run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
 
       - name: Pre-install Playwright for QA scripts
-        if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
+        if: steps.claude-qa-plan.outcome == 'success'
         run: npm install --no-save playwright
 
       - name: Generate frontdoor URL
         id: frontdoor
-        if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
+        if: steps.claude-qa-plan.outcome == 'success'
         run: |
           INSTANCE_URL=$(sf org display --target-org "${{ env.SCRATCH_ORG_ALIAS }}" --json | jq -r '.result.instanceUrl')
           URL=$(sf org open --url-only --target-org "${{ env.SCRATCH_ORG_ALIAS }}" --json | jq -r '.result.url')
@@ -394,7 +399,7 @@ jobs:
           fi
 
       - name: Run QA tests
-        if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
+        if: steps.claude-qa-plan.outcome == 'success'
         uses: anthropics/claude-code-action@v1
         id: claude-qa-run
         continue-on-error: true
@@ -403,36 +408,12 @@ jobs:
             Read ~/.claude/skills/qa-run/SKILL.md for instructions.
 
             Execute the test plan at /tmp/test-plan.md against the scratch org aliased "${{ env.SCRATCH_ORG_ALIAS }}".
+            Frontdoor URL: ${{ steps.frontdoor.outputs.url }}
+            Instance URL: ${{ steps.frontdoor.outputs.instance-url }}
 
             If /tmp/test-plan.md does not exist, is empty, or cannot be parsed as a test plan, write an empty results file to /tmp/qa-results.json and stop.
 
-            IMPORTANT: Write your results to /tmp/qa-results.json as you go. A separate step will handle evaluation and reporting — do NOT read qa-eval or post any report yourself.
-
-            ## E2E Testing Instructions (Phase 2)
-
-            Do NOT use MCP browser tools (browser_navigate, browser_take_screenshot, etc.) — they are not available in this environment. Do NOT search for them via ToolSearch.
-
-            Instead, write ONE Node.js script (.mjs) for ALL E2E scenarios and run it with `node`:
-            - Playwright is pre-installed: `import { chromium } from 'playwright';`
-            - Chromium binary: use `executablePath: '/usr/bin/chromium'` in launch options
-            - Frontdoor URL for scratch org login: ${{ steps.frontdoor.outputs.url }}
-            - Instance URL for direct navigation: ${{ steps.frontdoor.outputs.instance-url }}
-            - Launch args: `['--no-sandbox', '--disable-dev-shm-usage']`
-            - Save screenshots with: `await page.screenshot({ path: '/tmp/qa-screenshots/<scenario-id>.png' });`
-            - Wait for Lightning pages with `waitForFunction` checking for expected text, NOT `waitForLoadState('networkidle')`
-            - Use `page.getByRole()` and `page.getByText()` for element selection — NOT CSS selectors
-
-            IMPORTANT performance rules:
-            - Write ONE script for ALL E2E scenarios — do NOT write separate scripts per scenario
-            - Authenticate ONCE via the frontdoor URL at the start of the script
-            - Navigate directly to record pages using: `${instanceUrl}/lightning/r/<Object>/<Id>/view`
-            - Reuse record IDs from Phase 1 data test results (records already created)
-            - Wrap each scenario in try/catch so a failure does not abort remaining scenarios
-            - On failure, take a diagnostic screenshot before continuing to the next scenario
-
-            If the frontdoor URL above is empty, skip Phase 2 and note "frontdoor URL not available" in results.
-
-            Run: `mkdir -p /tmp/qa-screenshots` before executing any E2E tests.
+            Write your results to /tmp/qa-results.json as you go. A separate step will handle evaluation and reporting — do NOT read qa-eval or post any report yourself.
           claude_args: "--max-turns 75 --model claude-sonnet-4-6"
           additional_permissions: "Bash(git*),Bash(cp*),Bash(mkdir*),Bash(node*),Bash(npm*),Bash(npx*),Bash(find*)"
           show_full_output: "true"
@@ -449,7 +430,7 @@ jobs:
         run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
 
       - name: Evaluate and post QA report
-        if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
+        if: steps.claude-qa-plan.outcome == 'success'
         uses: anthropics/claude-code-action@v1
         id: claude-qa-eval
         continue-on-error: true
@@ -457,20 +438,8 @@ jobs:
           prompt: |
             Read ~/.claude/skills/qa-eval/SKILL.md for instructions.
 
-            Read the test results from /tmp/qa-results.json. If the file does not exist or is empty, post a comment on the PR/issue noting "QA tests could not complete — no results available."
-
-            If the results are partial (e.g., E2E tests did not complete), include whatever data test results are available and note which phases were incomplete.
-
-            Generate and post the QA report on PR for issue #${{ env.NUMBER }} in ${{ github.repository }}.
-
-            IMPORTANT for screenshot links in the report:
-            Do NOT use relative paths like [view](.verification/qa/ET-001.png) — they do not work in issue comments.
-            Instead, add this line in the E2E Tests section header:
-            "Screenshots available in the [Actions artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
-            In individual E2E test rows, use "see artifacts" in the Screenshot column instead of broken relative links.
-
-            After posting the report, commit screenshots if any exist:
-            cp /tmp/qa-screenshots/*.png .verification/qa/ 2>/dev/null && git add .verification/qa/ && git commit -m "qa: screenshots for issue #${{ env.NUMBER }}" && git push || true
+            Evaluate results and post QA report for issue #${{ env.NUMBER }} in ${{ github.repository }}.
+            Actions run URL for artifact links: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           claude_args: "--max-turns 30 --model claude-sonnet-4-6"
           additional_permissions: "Bash(git*),Bash(cp*),Bash(mkdir*)"
           show_full_output: "true"
@@ -484,15 +453,6 @@ jobs:
         with:
           name: qa-screenshots
           path: /tmp/qa-screenshots/
-          retention-days: 30
-          if-no-files-found: ignore
-
-      - name: Upload QA videos
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: qa-videos
-          path: /tmp/qa-videos/
           retention-days: 30
           if-no-files-found: ignore
 
@@ -511,14 +471,14 @@ jobs:
             echo "::error::Dev work failed"
             exit 1
           fi
+          if [ "${{ steps.claude-qa-plan.outcome }}" = "failure" ]; then
+            echo "::warning::QA plan generation failed (advisory — not blocking the job)"
+          fi
           if [ "${{ steps.claude-qa-run.outcome }}" = "failure" ]; then
             echo "::warning::QA test execution failed (advisory — not blocking the job)"
           fi
           if [ "${{ steps.claude-qa-eval.outcome }}" = "failure" ]; then
             echo "::warning::QA report generation failed (advisory — not blocking the job)"
-          fi
-          if [ "${{ steps.poll-test-plan.outputs.qa-plan-ready }}" = "false" ]; then
-            echo "::warning::QA was skipped — test plan artifact was not available"
           fi
 
       - name: Notify on execute failure
@@ -535,72 +495,4 @@ jobs:
             gh issue comment "$NUMBER" --repo ${{ github.repository }} --body "I couldn't finish — the run errored. See the [run logs]($RUN_URL). Mention me again to retry."
           fi
 
-  # ─── QA PLAN ───────────────────────────────────────────────────────
-  # Generates a requirements-driven test plan in parallel with execute.
-  # The execute job polls for the resulting artifact after dev work
-  # completes, then runs QA tests inline.
-
-  qa-plan:
-    name: qa-plan
-    needs: triage
-    if: needs.triage.outputs.proceed == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Checkout salesforce-ai-tools (skills + scripts)
-        uses: actions/checkout@v6
-        with:
-          repository: aquivalabs/salesforce-ai-tools
-          path: .sf-ai-tools
-
-      - name: Install skills and rules globally
-        run: bash scripts/install-sf-ai-tools.sh
-
-
-      - name: Generate test plan
-        uses: anthropics/claude-code-action@v1
-        id: claude
-        with:
-          prompt: |
-            Read ~/.claude/skills/qa-plan/SKILL.md for instructions.
-
-            Generate a test plan for issue #${{ needs.triage.outputs.number }} in ${{ github.repository }}.
-
-            The triage plan (what the dev agent committed to):
-
-            --- Plan ---
-            ${{ needs.triage.outputs.plan }}
-            --- End plan ---
-          claude_args: "--max-turns 15 --model claude-sonnet-4-6"
-          show_full_output: "true"
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload test plan artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-plan
-          path: /tmp/test-plan.md
-          retention-days: 30
-
-      - name: Report AI cost
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
-          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
-        run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
-
-      - name: Notify on qa-plan failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NUMBER: ${{ needs.triage.outputs.number }}
-        run: |
-          gh issue comment "$NUMBER" --repo ${{ github.repository }} --body "QA plan generation failed. See the [run logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}). This does not affect the dev track."
 

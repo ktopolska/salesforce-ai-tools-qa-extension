@@ -41,34 +41,57 @@ If the template invocation fails (Apex exception, API error):
 
 ## Phase 2: Playwright E2E
 
-### Navigate to Template UI
+Write ONE `.mjs` script for ALL E2E scenarios. Use the patterns below.
 
-If the template is surfaced in the UI (e.g., Einstein Copilot panel, action button):
+### Playwright Patterns
 
-```javascript
-// Navigate to the record
-await page.goto(`${instanceUrl}/lightning/r/<Object>/<recordId>/view`);
-
-// Open the template invocation point (varies by integration)
-// Example: Einstein copilot sidebar
-await page.locator('button[title="Einstein"]').click();
-await page.waitForSelector('.copilot-panel');
+#### Login via Frontdoor URL
+```js
+await page.goto(frontdoorUrl);
+await page.waitForFunction(() => {
+  return document.title !== '' && !document.title.includes('Login');
+}, { timeout: 30000 });
 ```
 
-### Capture Output
-
-```javascript
-// Wait for generated text to appear
-await page.waitForSelector('.generated-response', { timeout: 30000 });
-const outputText = await page.locator('.generated-response').textContent();
+#### Navigate to Record Page
+```js
+await page.goto(`${instanceUrl}/lightning/r/${objectName}/${recordId}/view`);
+await page.waitForFunction(() => {
+  return document.querySelector('records-highlights-details') !== null
+    || document.querySelector('records-record-layout-section') !== null;
+}, { timeout: 30000 });
 ```
 
-### Screenshot Points
+#### Open Einstein Copilot Panel
+```js
+const einsteinBtn = page.getByRole('button', { name: /einstein/i });
+await einsteinBtn.click();
+await page.waitForFunction(() => {
+  return document.querySelector('[class*="copilot"]') !== null
+    || document.querySelector('[class*="einstein"]') !== null;
+}, { timeout: 15000 });
+```
 
-1. Before template invocation (record context visible)
-2. After output is generated (template response visible)
-3. Error state (if invocation fails)
+#### Capture Generated Output
+```js
+await page.waitForFunction(() => {
+  const responses = document.querySelectorAll('[class*="response"], [class*="message"]');
+  return responses.length > 0;
+}, { timeout: 30000 });
+const outputText = await page.locator('[class*="response"]').last().textContent();
+```
 
-```javascript
-await page.screenshot({ path: '/tmp/qa-screenshots/<scenario-id>.png' });
+#### Screenshot at Assertion Point
+```js
+await page.screenshot({ path: `/tmp/qa-screenshots/${scenarioId}.png` });
+```
+
+#### Try/Catch Wrapper Per Scenario
+```js
+try {
+  // Navigate, open panel, capture output, screenshot
+} catch (err) {
+  await page.screenshot({ path: `/tmp/qa-screenshots/${scenarioId}-error.png` });
+  results.push({ id: scenarioId, result: 'FAIL', details: err.message });
+}
 ```
