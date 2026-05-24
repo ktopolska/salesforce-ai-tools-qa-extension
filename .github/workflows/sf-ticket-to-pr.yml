@@ -377,6 +377,19 @@ jobs:
         if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
         run: npm install --no-save playwright
 
+      - name: Generate frontdoor URL
+        id: frontdoor
+        if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
+        run: |
+          URL=$(sf org open --url-only --target-org "${{ env.SCRATCH_ORG_ALIAS }}" --json | jq -r '.result.url')
+          if [ -n "$URL" ] && [ "$URL" != "null" ]; then
+            echo "url=$URL" >> $GITHUB_OUTPUT
+            echo "::notice::Frontdoor URL generated for E2E tests"
+          else
+            echo "url=" >> $GITHUB_OUTPUT
+            echo "::warning::Could not generate frontdoor URL — E2E tests will be skipped"
+          fi
+
       - name: Run QA tests
         if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
         uses: anthropics/claude-code-action@v1
@@ -392,10 +405,22 @@ jobs:
 
             IMPORTANT: Write your results to /tmp/qa-results.json as you go. A separate step will handle evaluation and reporting — do NOT read qa-eval or post any report yourself.
 
-            IMPORTANT for screenshots:
-            1. Run: mkdir -p /tmp/qa-screenshots
-            2. During E2E tests, save every Playwright screenshot to /tmp/qa-screenshots/<scenario-id>.png
-            3. Use browser_take_screenshot with savePath="/tmp/qa-screenshots/ET-001.png" etc.
+            ## E2E Testing Instructions (Phase 2)
+
+            Do NOT use MCP browser tools (browser_navigate, browser_take_screenshot, etc.) — they are not available in this environment. Do NOT search for them via ToolSearch.
+
+            Instead, write a Node.js script (.mjs) and run it with `node`:
+            - Playwright is pre-installed: `import { chromium } from 'playwright';`
+            - Chromium binary: use `executablePath: '/usr/bin/chromium'` in launch options
+            - Frontdoor URL for scratch org login: ${{ steps.frontdoor.outputs.url }}
+            - Launch args: `['--no-sandbox', '--disable-dev-shm-usage']`
+            - Save screenshots with: `await page.screenshot({ path: '/tmp/qa-screenshots/<scenario-id>.png' });`
+            - Wait for Lightning pages with `waitForFunction` checking for expected text, NOT `waitForLoadState('networkidle')`
+            - Use `page.getByRole()` and `page.getByText()` for element selection — NOT CSS selectors
+
+            If the frontdoor URL above is empty, skip Phase 2 and note "frontdoor URL not available" in results.
+
+            Run: `mkdir -p /tmp/qa-screenshots` before executing any E2E tests.
           claude_args: "--max-turns 75 --model claude-sonnet-4-6"
           additional_permissions: "Bash(git*),Bash(cp*),Bash(mkdir*),Bash(node*),Bash(npm*),Bash(npx*),Bash(find*)"
           show_full_output: "true"
