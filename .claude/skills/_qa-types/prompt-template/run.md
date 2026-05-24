@@ -41,57 +41,82 @@ If the template invocation fails (Apex exception, API error):
 
 ## Phase 2: Playwright E2E
 
-Write ONE `.mjs` script for ALL E2E scenarios. Use the patterns below.
+Write ONE `.mjs` script for ALL E2E scenarios. **Copy the template below** and fill in the `SCENARIOS` array.
 
-### Playwright Patterns
+### Complete Script Template
 
-#### Login via Frontdoor URL
+Save as `/tmp/qa-e2e.mjs` and run with `node /tmp/qa-e2e.mjs`:
+
 ```js
-await page.goto(frontdoorUrl);
-await page.waitForFunction(() => {
-  return document.title !== '' && !document.title.includes('Login');
-}, { timeout: 30000 });
+import { chromium } from 'playwright';
+
+const FRONTDOOR_URL = process.env.FRONTDOOR_URL || '<REPLACE_WITH_FRONTDOOR_URL>';
+const INSTANCE_URL = process.env.INSTANCE_URL || '<REPLACE_WITH_INSTANCE_URL>';
+
+const SCENARIOS = [
+  {
+    id: 'ET-001',
+    objectName: 'Opportunity',
+    recordId: '<ID_FROM_PHASE_1>',
+    action: 'open-einstein',  // 'navigate-only' | 'open-einstein'
+    expectedOutput: 'summary of the opportunity',
+  },
+];
+
+(async () => {
+  const browser = await chromium.launch({
+    executablePath: '/usr/bin/chromium',
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+  });
+  const page = await browser.newPage();
+  const results = [];
+
+  await page.goto(FRONTDOOR_URL);
+  await page.waitForFunction(
+    () => document.title !== '' && !document.title.includes('Login'),
+    { timeout: 30000 }
+  );
+
+  for (const s of SCENARIOS) {
+    try {
+      await page.goto(`${INSTANCE_URL}/lightning/r/${s.objectName}/${s.recordId}/view`);
+      await page.waitForFunction(
+        () => document.querySelector('records-highlights-details') !== null
+          || document.querySelector('records-record-layout-section') !== null,
+        { timeout: 30000 }
+      );
+
+      if (s.action === 'open-einstein') {
+        const einsteinBtn = page.getByRole('button', { name: /einstein/i });
+        await einsteinBtn.click();
+        await page.waitForFunction(
+          () => document.querySelector('[class*="copilot"]') !== null
+            || document.querySelector('[class*="einstein"]') !== null,
+          { timeout: 15000 }
+        );
+        await page.waitForFunction(
+          () => {
+            const responses = document.querySelectorAll('[class*="response"], [class*="message"]');
+            return responses.length > 0;
+          },
+          { timeout: 30000 }
+        );
+        const outputText = await page.locator('[class*="response"]').last().textContent();
+        const hasExpected = outputText.toLowerCase().includes(s.expectedOutput.toLowerCase());
+        if (!hasExpected) throw new Error(`Output does not contain "${s.expectedOutput}": ${outputText.substring(0, 200)}`);
+      }
+
+      await page.screenshot({ path: `/tmp/qa-screenshots/${s.id}.png` });
+      results.push({ id: s.id, result: 'PASS', details: 'assertions passed' });
+    } catch (err) {
+      await page.screenshot({ path: `/tmp/qa-screenshots/${s.id}-error.png` }).catch(() => {});
+      results.push({ id: s.id, result: 'FAIL', details: err.message });
+    }
+  }
+
+  await browser.close();
+  console.log(JSON.stringify(results, null, 2));
+})();
 ```
 
-#### Navigate to Record Page
-```js
-await page.goto(`${instanceUrl}/lightning/r/${objectName}/${recordId}/view`);
-await page.waitForFunction(() => {
-  return document.querySelector('records-highlights-details') !== null
-    || document.querySelector('records-record-layout-section') !== null;
-}, { timeout: 30000 });
-```
-
-#### Open Einstein Copilot Panel
-```js
-const einsteinBtn = page.getByRole('button', { name: /einstein/i });
-await einsteinBtn.click();
-await page.waitForFunction(() => {
-  return document.querySelector('[class*="copilot"]') !== null
-    || document.querySelector('[class*="einstein"]') !== null;
-}, { timeout: 15000 });
-```
-
-#### Capture Generated Output
-```js
-await page.waitForFunction(() => {
-  const responses = document.querySelectorAll('[class*="response"], [class*="message"]');
-  return responses.length > 0;
-}, { timeout: 30000 });
-const outputText = await page.locator('[class*="response"]').last().textContent();
-```
-
-#### Screenshot at Assertion Point
-```js
-await page.screenshot({ path: `/tmp/qa-screenshots/${scenarioId}.png` });
-```
-
-#### Try/Catch Wrapper Per Scenario
-```js
-try {
-  // Navigate, open panel, capture output, screenshot
-} catch (err) {
-  await page.screenshot({ path: `/tmp/qa-screenshots/${scenarioId}-error.png` });
-  results.push({ id: scenarioId, result: 'FAIL', details: err.message });
-}
-```
+**How to use**: Copy template, fill `SCENARIOS` array, run with `node /tmp/qa-e2e.mjs`.

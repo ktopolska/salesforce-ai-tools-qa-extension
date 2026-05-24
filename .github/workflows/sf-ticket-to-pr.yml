@@ -343,8 +343,42 @@ jobs:
         run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
 
       # ─── QA TRACK (inline) ───────────────────────────────────────────
-      # After dev work completes, generate a test plan (with org access),
-      # then run QA tests in this same scratch org session.
+      # After dev work completes, query org metadata, generate a test
+      # plan, then run QA tests in this same scratch org session.
+
+      - name: Query org metadata for QA
+        id: org-metadata
+        if: steps.claude-dev.outcome == 'success'
+        env:
+          TRIAGE_PLAN: ${{ needs.triage.outputs.plan }}
+        run: |
+          KNOWN_OBJECTS="Account Contact Lead Opportunity Case Task Event User Order Product PricebookEntry Quote Contract Campaign CampaignMember Asset WorkOrder ServiceAppointment LiveChatTranscript MessagingSession"
+          FOUND_OBJECTS=""
+          for obj in $KNOWN_OBJECTS; do
+            if echo "$TRIAGE_PLAN" | grep -qiw "$obj"; then
+              FOUND_OBJECTS="$FOUND_OBJECTS $obj"
+            fi
+          done
+          CUSTOM_OBJECTS=$(echo "$TRIAGE_PLAN" | grep -oE '[A-Za-z_]+__c' | sort -u | tr '\n' ' ')
+          FOUND_OBJECTS="$FOUND_OBJECTS $CUSTOM_OBJECTS"
+          FOUND_OBJECTS=$(echo "$FOUND_OBJECTS" | xargs)
+
+          if [ -z "$FOUND_OBJECTS" ]; then
+            echo "::notice::No Salesforce objects found in triage plan — skipping metadata query"
+            > /tmp/org-metadata.txt
+            exit 0
+          fi
+
+          echo "::notice::Querying metadata for: $FOUND_OBJECTS"
+          > /tmp/org-metadata.txt
+          for obj in $FOUND_OBJECTS; do
+            FIELDS=$(sf sobject describe "$obj" --target-org "$SCRATCH_ORG_ALIAS" --json 2>/dev/null \
+              | jq -c '[.result.fields[] | {name: .name, type: .type, label: .label, picklistValues: [.picklistValues[]? | select(.active) | .value]}]' 2>/dev/null \
+              || echo '[]')
+            echo "## $obj" >> /tmp/org-metadata.txt
+            echo "$FIELDS" >> /tmp/org-metadata.txt
+          done
+          echo "::notice::Org metadata written to /tmp/org-metadata.txt"
 
       - name: Generate test plan
         if: steps.claude-dev.outcome == 'success'
@@ -356,7 +390,9 @@ jobs:
             Read ~/.claude/skills/qa-plan/SKILL.md for instructions.
 
             Generate a test plan for issue #${{ env.NUMBER }} in ${{ github.repository }}.
-            Scratch org alias: ${{ env.SCRATCH_ORG_ALIAS }}
+
+            Pre-queried org metadata is at /tmp/org-metadata.txt — read it for field API names, types, and picklist values.
+            If the file is empty or missing, generate scenarios from the issue text alone.
 
             The triage plan (what the dev agent committed to):
 
@@ -364,7 +400,7 @@ jobs:
             ${{ needs.triage.outputs.plan }}
             --- End plan ---
           claude_args: "--max-turns 15 --model claude-sonnet-4-6"
-          additional_permissions: "Bash(sf*),Bash(git*)"
+          additional_permissions: "Bash(git*)"
           show_full_output: "true"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -410,6 +446,10 @@ jobs:
             Execute the test plan at /tmp/test-plan.md against the scratch org aliased "${{ env.SCRATCH_ORG_ALIAS }}".
             Frontdoor URL: ${{ steps.frontdoor.outputs.url }}
             Instance URL: ${{ steps.frontdoor.outputs.instance-url }}
+
+            Before running the E2E script, export these so the template can read them:
+            export FRONTDOOR_URL="${{ steps.frontdoor.outputs.url }}"
+            export INSTANCE_URL="${{ steps.frontdoor.outputs.instance-url }}"
 
             If /tmp/test-plan.md does not exist, is empty, or cannot be parsed as a test plan, write an empty results file to /tmp/qa-results.json and stop.
 

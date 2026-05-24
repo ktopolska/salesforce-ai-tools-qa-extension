@@ -39,56 +39,89 @@ RESULT=$(sf data update record --sobject <Object> --record-id <id> --values "<Tr
 
 ## Phase 2: Playwright E2E
 
-Write ONE `.mjs` script for ALL E2E scenarios. Use the patterns below.
+Write ONE `.mjs` script for ALL E2E scenarios. **Copy the template below** and fill in the `SCENARIOS` array with record IDs and assertions from Phase 1.
 
-### Playwright Patterns
+### Complete Script Template
 
-#### Login via Frontdoor URL
+Save as `/tmp/qa-e2e.mjs` and run with `node /tmp/qa-e2e.mjs`:
+
 ```js
-await page.goto(frontdoorUrl);
-await page.waitForFunction(() => {
-  return document.title !== '' && !document.title.includes('Login');
-}, { timeout: 30000 });
+import { chromium } from 'playwright';
+
+const FRONTDOOR_URL = process.env.FRONTDOOR_URL || '<REPLACE_WITH_FRONTDOOR_URL>';
+const INSTANCE_URL = process.env.INSTANCE_URL || '<REPLACE_WITH_INSTANCE_URL>';
+
+// FILL IN: one entry per ET-NNN scenario from the test plan
+const SCENARIOS = [
+  {
+    id: 'ET-001',
+    objectName: 'Opportunity',    // Salesforce object API name
+    recordId: '<ID_FROM_PHASE_1>', // record ID created in data tests
+    assertions: [
+      { type: 'text-visible', value: 'Closed Won' },
+      { type: 'text-visible', value: 'Follow up: High-value deal' },
+    ]
+  },
+  // Add more scenarios...
+];
+
+(async () => {
+  const browser = await chromium.launch({
+    executablePath: '/usr/bin/chromium',
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+  });
+  const page = await browser.newPage();
+  const results = [];
+
+  // Authenticate once
+  await page.goto(FRONTDOOR_URL);
+  await page.waitForFunction(
+    () => document.title !== '' && !document.title.includes('Login'),
+    { timeout: 30000 }
+  );
+
+  for (const s of SCENARIOS) {
+    try {
+      // Navigate to record page
+      await page.goto(`${INSTANCE_URL}/lightning/r/${s.objectName}/${s.recordId}/view`);
+      await page.waitForFunction(
+        () => document.querySelector('records-highlights-details') !== null
+          || document.querySelector('records-record-layout-section') !== null,
+        { timeout: 30000 }
+      );
+
+      // Run assertions
+      const details = [];
+      for (const a of s.assertions) {
+        if (a.type === 'text-visible') {
+          const visible = await page.getByText(a.value, { exact: false }).first().isVisible({ timeout: 10000 }).catch(() => false);
+          details.push(`"${a.value}" visible: ${visible}`);
+          if (!visible) throw new Error(`Expected text "${a.value}" not visible on page`);
+        } else if (a.type === 'related-list-has-rows') {
+          const heading = page.getByRole('heading', { name: a.listName });
+          await heading.scrollIntoViewIfNeeded();
+          const count = await heading.locator('..').locator('a[data-refid="recordId"]').count();
+          details.push(`${a.listName} rows: ${count}`);
+          if (count < (a.minRows || 1)) throw new Error(`Related list "${a.listName}" has ${count} rows, expected >= ${a.minRows || 1}`);
+        } else if (a.type === 'error-banner') {
+          const alert = page.getByRole('alert');
+          const text = await alert.textContent({ timeout: 10000 });
+          details.push(`Error banner: ${text}`);
+          if (!text.includes(a.contains)) throw new Error(`Error banner missing "${a.contains}"`);
+        }
+      }
+
+      await page.screenshot({ path: `/tmp/qa-screenshots/${s.id}.png` });
+      results.push({ id: s.id, result: 'PASS', details: details.join('; ') });
+    } catch (err) {
+      await page.screenshot({ path: `/tmp/qa-screenshots/${s.id}-error.png` }).catch(() => {});
+      results.push({ id: s.id, result: 'FAIL', details: err.message });
+    }
+  }
+
+  await browser.close();
+  console.log(JSON.stringify(results, null, 2));
+})();
 ```
 
-#### Navigate to Record Page
-```js
-await page.goto(`${instanceUrl}/lightning/r/${objectName}/${recordId}/view`);
-await page.waitForFunction(() => {
-  return document.querySelector('records-highlights-details') !== null
-    || document.querySelector('records-record-layout-section') !== null;
-}, { timeout: 30000 });
-```
-
-#### Verify Field Value on Record Page
-```js
-const fieldVisible = await page.getByText(expectedValue).isVisible({ timeout: 10000 });
-```
-
-#### Verify Related List Has Records
-```js
-const relatedList = page.getByRole('heading', { name: relatedListLabel }).locator('..');
-await relatedList.scrollIntoViewIfNeeded();
-const rows = await relatedList.locator('a[data-refid="recordId"]').count();
-```
-
-#### Screenshot at Assertion Point
-```js
-await page.screenshot({ path: `/tmp/qa-screenshots/${scenarioId}.png`, fullPage: false });
-```
-
-#### Error Scenario — Verify Error Message
-```js
-const errorBanner = page.getByRole('alert');
-const errorText = await errorBanner.textContent();
-```
-
-#### Try/Catch Wrapper Per Scenario
-```js
-try {
-  // Navigate, assert, screenshot
-} catch (err) {
-  await page.screenshot({ path: `/tmp/qa-screenshots/${scenarioId}-error.png` });
-  results.push({ id: scenarioId, result: 'FAIL', details: err.message });
-}
-```
+**How to use**: Copy this template, replace the `SCENARIOS` array entries with actual record IDs and assertions from Phase 1 results. Run with `node /tmp/qa-e2e.mjs`. Parse the JSON output to update `/tmp/qa-results.json`.

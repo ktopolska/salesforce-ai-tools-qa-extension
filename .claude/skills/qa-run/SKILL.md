@@ -33,6 +33,13 @@ For each DT-NNN scenario:
 5. **Record result**: Store PASS/FAIL with details for each scenario
 6. **Write results incrementally**: After each scenario completes, write the full results JSON to `/tmp/qa-results.json` (overwrite). This ensures partial results survive if execution is interrupted.
 
+#### Efficiency: Batch Operations
+
+- **Group record creation**: Create all test records for related scenarios before running assertions. For example, create all Opportunity records first (in sequential `sf data create record` commands or a single Apex script), then run all SOQL assertions.
+- **Combine SOQL fields**: When multiple scenarios check different fields on the same record, query once with all needed fields in the SELECT clause rather than one query per field.
+- **One setup, many assertions**: Write a single bash script that creates all Phase 1 test data, run it once, then run assertions against the created records.
+- **Target pace**: ~2-3 turns per data test scenario (batch create + batch assert + record results).
+
 **Critical failure check**: After all data tests, if more than 50% of scenarios failed, flag Phase 2 as skipped:
 - Record: "Phase 2 (E2E) skipped — too many data test failures indicate fundamental issues"
 - Proceed directly to output

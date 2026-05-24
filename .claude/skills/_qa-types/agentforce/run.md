@@ -64,67 +64,101 @@ sf data query --query "SELECT Id, EventType, Payload FROM AgentSessionTrace WHER
 
 ## Phase 2: Playwright E2E
 
-Write ONE `.mjs` script for ALL E2E scenarios. Use the patterns below.
+Write ONE `.mjs` script for ALL E2E scenarios. **Copy the template below** and fill in the `SCENARIOS` array.
 
-### Playwright Patterns
+### Complete Script Template
 
-#### Login via Frontdoor URL
+Save as `/tmp/qa-e2e.mjs` and run with `node /tmp/qa-e2e.mjs`:
+
 ```js
-await page.goto(frontdoorUrl);
-await page.waitForFunction(() => {
-  return document.title !== '' && !document.title.includes('Login');
-}, { timeout: 30000 });
+import { chromium } from 'playwright';
+
+const FRONTDOOR_URL = process.env.FRONTDOOR_URL || '<REPLACE_WITH_FRONTDOOR_URL>';
+const INSTANCE_URL = process.env.INSTANCE_URL || '<REPLACE_WITH_INSTANCE_URL>';
+
+const SCENARIOS = [
+  {
+    id: 'ET-001',
+    utterance: 'Find my recent cases',
+    expectedInResponse: 'case',
+    checkRecordAfter: null,  // or { objectName: 'Case', recordId: '<id>', fieldText: 'Critical' }
+  },
+];
+
+(async () => {
+  const browser = await chromium.launch({
+    executablePath: '/usr/bin/chromium',
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+  });
+  const page = await browser.newPage();
+  const results = [];
+
+  await page.goto(FRONTDOOR_URL);
+  await page.waitForFunction(
+    () => document.title !== '' && !document.title.includes('Login'),
+    { timeout: 30000 }
+  );
+
+  // Navigate to home and open Agentforce panel
+  await page.goto(`${INSTANCE_URL}/lightning/page/home`);
+  await page.waitForFunction(
+    () => document.title.includes('Home') || document.title.includes('Sales'),
+    { timeout: 30000 }
+  );
+  const agentBtn = page.getByRole('button', { name: /agentforce|agent/i });
+  await agentBtn.click();
+  await page.waitForFunction(
+    () => document.querySelector('[class*="agent-chat"]') !== null
+      || document.querySelector('[class*="messaging"]') !== null,
+    { timeout: 15000 }
+  );
+
+  for (const s of SCENARIOS) {
+    try {
+      const chatInput = page.getByRole('textbox', { name: /message|type/i });
+      const msgsBefore = await page.locator('[class*="message"], [class*="response"]').count();
+
+      await chatInput.fill(s.utterance);
+      await chatInput.press('Enter');
+
+      await page.waitForFunction(
+        (prev) => {
+          const msgs = document.querySelectorAll('[class*="message"], [class*="response"]');
+          return msgs.length > prev;
+        },
+        msgsBefore,
+        { timeout: 30000 }
+      );
+
+      const responseText = await page.locator('[class*="response"], [class*="message"]').last().textContent();
+      if (s.expectedInResponse && !responseText.toLowerCase().includes(s.expectedInResponse.toLowerCase())) {
+        throw new Error(`Response missing "${s.expectedInResponse}": ${responseText.substring(0, 200)}`);
+      }
+
+      await page.screenshot({ path: `/tmp/qa-screenshots/${s.id}.png` });
+
+      if (s.checkRecordAfter) {
+        const r = s.checkRecordAfter;
+        await page.goto(`${INSTANCE_URL}/lightning/r/${r.objectName}/${r.recordId}/view`);
+        await page.waitForFunction(
+          () => document.querySelector('records-highlights-details') !== null,
+          { timeout: 30000 }
+        );
+        const fieldVisible = await page.getByText(r.fieldText, { exact: false }).first().isVisible({ timeout: 10000 }).catch(() => false);
+        if (!fieldVisible) throw new Error(`Expected "${r.fieldText}" not visible on record`);
+        await page.screenshot({ path: `/tmp/qa-screenshots/${s.id}-record.png` });
+      }
+
+      results.push({ id: s.id, result: 'PASS', details: 'assertions passed' });
+    } catch (err) {
+      await page.screenshot({ path: `/tmp/qa-screenshots/${s.id}-error.png` }).catch(() => {});
+      results.push({ id: s.id, result: 'FAIL', details: err.message });
+    }
+  }
+
+  await browser.close();
+  console.log(JSON.stringify(results, null, 2));
+})();
 ```
 
-#### Open Agentforce Panel
-```js
-await page.goto(`${instanceUrl}/lightning/page/home`);
-await page.waitForFunction(() => {
-  return document.querySelector('records-highlights-details') !== null
-    || document.title.includes('Home');
-}, { timeout: 30000 });
-
-const agentBtn = page.getByRole('button', { name: /agentforce|agent/i });
-await agentBtn.click();
-await page.waitForFunction(() => {
-  return document.querySelector('[class*="agent-chat"]') !== null
-    || document.querySelector('[class*="messaging"]') !== null;
-}, { timeout: 15000 });
-```
-
-#### Send Message and Wait for Response
-```js
-const chatInput = page.getByRole('textbox', { name: /message|type/i });
-await chatInput.fill(utterance);
-await chatInput.press('Enter');
-
-await page.waitForFunction((prevCount) => {
-  const messages = document.querySelectorAll('[class*="message"], [class*="response"]');
-  return messages.length > prevCount;
-}, messageCountBefore, { timeout: 30000 });
-
-const responseText = await page.locator('[class*="response"], [class*="message"]').last().textContent();
-```
-
-#### Navigate to Record After Action
-```js
-await page.goto(`${instanceUrl}/lightning/r/${objectName}/${recordId}/view`);
-await page.waitForFunction(() => {
-  return document.querySelector('records-highlights-details') !== null;
-}, { timeout: 30000 });
-```
-
-#### Screenshot at Assertion Point
-```js
-await page.screenshot({ path: `/tmp/qa-screenshots/${scenarioId}.png` });
-```
-
-#### Try/Catch Wrapper Per Scenario
-```js
-try {
-  // Send message, wait, assert, screenshot
-} catch (err) {
-  await page.screenshot({ path: `/tmp/qa-screenshots/${scenarioId}-error.png` });
-  results.push({ id: scenarioId, result: 'FAIL', details: err.message });
-}
-```
+**How to use**: Copy template, fill `SCENARIOS` array with utterances and assertions, run with `node /tmp/qa-e2e.mjs`.

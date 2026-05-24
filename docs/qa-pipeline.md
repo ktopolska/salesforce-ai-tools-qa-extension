@@ -50,12 +50,13 @@ Reads the issue thread, decides whether to proceed. Posts a plan comment. Unchan
 Does the dev work, then runs QA inline:
 
 1. **Dev work** — Claude agent implements the ticket against the scratch org
-2. **Generate test plan** (qa-plan) — reads the issue + queries org metadata for field names, generates DT-NNN/ET-NNN scenarios
-3. **Pre-install Playwright** — `npm install --no-save playwright`
-4. **Generate frontdoor URL** — `sf org open --url-only` + `sf org display` for instance URL
-5. **Run QA tests** (qa-run, 75 max-turns) — data tests via SOQL, E2E via Playwright Node.js scripts
-6. **Evaluate and post QA report** (qa-eval, 30 max-turns) — reads results, classifies failures, posts report
-7. **Upload screenshots** — as GitHub Actions artifacts
+2. **Query org metadata** — shell step greps the triage plan for Salesforce object names, runs `sf sobject describe` + `jq` to extract field metadata to `/tmp/org-metadata.txt`
+3. **Generate test plan** (qa-plan) — reads the issue + pre-queried org metadata for field names, generates DT-NNN/ET-NNN scenarios
+4. **Pre-install Playwright** — `npm install --no-save playwright`
+5. **Generate frontdoor URL** — `sf org open --url-only` + `sf org display` for instance URL
+6. **Run QA tests** (qa-run, 75 max-turns) — data tests via SOQL (batched), E2E via Playwright Node.js scripts (copy-paste templates)
+7. **Evaluate and post QA report** (qa-eval, 30 max-turns) — reads results, classifies failures, posts report
+8. **Upload screenshots** — as GitHub Actions artifacts
 
 QA failures are **advisory** — they produce warning annotations but don't fail the execute job. The job only fails if dev work failed.
 
@@ -65,9 +66,9 @@ QA failures are **advisory** — they produce warning annotations but don't fail
 
 ### Test Planning (qa-plan step)
 
-The qa-plan agent reads the issue requirements and triage plan, then queries the scratch org for field-level metadata (`sf sobject describe`). The issue description defines *what* to test (business logic). The org metadata provides *exact field names and types* so scenarios are precise.
+A shell step greps the triage plan for Salesforce object names (standard + custom `__c`) and runs `sf sobject describe` with `jq` to extract field metadata to `/tmp/org-metadata.txt`. The qa-plan agent reads this file for field API names, types, and picklist values. The issue description defines *what* to test (business logic). The org metadata provides *exact field names and types* so scenarios are precise.
 
-Falls back to issue-text-only planning if the org query fails.
+Falls back to issue-text-only planning if the metadata file is empty.
 
 ### Data tests (Phase 1)
 
@@ -243,10 +244,11 @@ Costs vary by issue complexity. The triage job is cheap — if it refuses or ask
 | Decision | Rationale |
 |----------|-----------|
 | QA inline in execute (2-job pipeline) | Reuses the same scratch org. qa-plan gets org access for metadata queries. No artifact polling needed. |
-| qa-plan queries org metadata | Issue defines business logic (what to test). Org metadata provides field names and types (how to reference them precisely). |
+| Pre-query org metadata in shell step | Shell steps have no permission restrictions. Greps triage plan for object names, runs `sf sobject describe` + `jq`. Agent reads the file — no permission issues, saves turns. |
 | Split qa-run and qa-eval into two invocations | Guarantees the report is always posted. qa-run can exhaust turns on E2E without losing the report. |
 | Playwright via Node.js scripts (not MCP) | MCP server never starts in `claude-code-action` with OAuth tokens (`mcp_servers: []`). Scripts are reliable and deterministic. |
-| Playwright patterns in skill modules | Agent copies proven code snippets from `run.md` modules. No separate importable file to manage. |
+| Copy-paste Playwright templates in skill modules | Agent copies a complete, runnable script template from `run.md`, fills in the scenario array. Eliminates setup debugging (chromium path, imports, wait strategies). |
+| Batched data test operations | Agent creates all test records first, then runs all assertions. Reduces ~4 turns per scenario to ~2-3 turns. |
 | Pre-generate frontdoor URL in shell step | `sf org open` is not in the agent's permission set. Shell steps have no restrictions. |
 | Screenshot links to Actions artifacts | Relative paths don't work in issue comments. Artifact page URLs work everywhere. |
 | Single browser session for all E2E scenarios | One login instead of N. Direct record URLs instead of UI navigation. ~30% faster. |
