@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Flow xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>65.0</apiVersion>
+    <assignments>
+        <name>Assign_Cold</name>
+        <label>Assign Cold</label>
+        <locationX>176</locationX>
+        <locationY>566</locationY>
+        <assignmentItems>
+            <assignToReference>$Record.Rating</assignToReference>
+            <operator>Assign</operator>
+            <value>
+                <stringValue>Cold</stringValue>
+            </value>
+        </assignmentItems>
+    </assignments>
+    <assignments>
+        <name>Assign_Hot</name>
+        <label>Assign Hot</label>
+        <locationX>440</locationX>
+        <locationY>350</locationY>
+        <assignmentItems>
+            <assignToReference>$Record.Rating</assignToReference>
+            <operator>Assign</operator>
+            <value>
+                <stringValue>Hot</stringValue>
+            </value>
+        </assignmentItems>
+    </assignments>
+    <assignments>
+        <name>Assign_Warm</name>
+        <label>Assign Warm</label>
+        <locationX>308</locationX>
+        <locationY>566</locationY>
+        <assignmentItems>
+            <assignToReference>$Record.Rating</assignToReference>
+            <operator>Assign</operator>
+            <value>
+                <stringValue>Warm</stringValue>
+            </value>
+        </assignmentItems>
+    </assignments>
+    <decisions>
+        <name>Check_Hot_Tier</name>
+        <label>Check Hot Tier</label>
+        <locationX>308</locationX>
+        <locationY>242</locationY>
+        <defaultConnector>
+            <targetReference>Check_Warm_Tier</targetReference>
+        </defaultConnector>
+        <defaultConnectorLabel>Not Hot</defaultConnectorLabel>
+        <rules>
+            <name>Is_Hot</name>
+            <conditionLogic>and</conditionLogic>
+            <conditions>
+                <leftValueReference>$Record.AnnualRevenue</leftValueReference>
+                <operator>GreaterThan</operator>
+                <rightValue>
+                    <numberValue>1000000</numberValue>
+                </rightValue>
+            </conditions>
+            <connector>
+                <targetReference>Assign_Hot</targetReference>
+            </connector>
+            <label>Hot</label>
+        </rules>
+    </decisions>
+    <decisions>
+        <name>Check_Warm_Tier</name>
+        <label>Check Warm Tier</label>
+        <locationX>176</locationX>
+        <locationY>458</locationY>
+        <defaultConnector>
+            <targetReference>Assign_Cold</targetReference>
+        </defaultConnector>
+        <defaultConnectorLabel>Cold or Null</defaultConnectorLabel>
+        <rules>
+            <name>Is_Warm</name>
+            <conditionLogic>and</conditionLogic>
+            <conditions>
+                <leftValueReference>$Record.AnnualRevenue</leftValueReference>
+                <operator>GreaterThan</operator>
+                <rightValue>
+                    <numberValue>100000</numberValue>
+                </rightValue>
+            </conditions>
+            <connector>
+                <targetReference>Assign_Warm</targetReference>
+            </connector>
+            <label>Warm</label>
+        </rules>
+    </decisions>
+    <interviewLabel>Account Set Rating From Annual Revenue {!$Flow.CurrentDateTime}</interviewLabel>
+    <label>Account Set Rating From Annual Revenue</label>
+    <processMetadataValues>
+        <name>BuilderType</name>
+        <value>
+            <stringValue>LightningFlowBuilder</stringValue>
+        </value>
+    </processMetadataValues>
+    <processMetadataValues>
+        <name>CanvasMode</name>
+        <value>
+            <stringValue>AUTO_LAYOUT_CANVAS</stringValue>
+        </value>
+    </processMetadataValues>
+    <processType>AutoLaunchedFlow</processType>
+    <start>
+        <locationX>182</locationX>
+        <locationY>134</locationY>
+        <connector>
+            <targetReference>Check_Hot_Tier</targetReference>
+        </connector>
+        <object>Account</object>
+        <recordTriggerType>CreateAndUpdate</recordTriggerType>
+        <triggerType>RecordBeforeSave</triggerType>
+    </start>
+    <status>Active</status>
+</Flow>
