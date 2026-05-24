@@ -381,12 +381,15 @@ jobs:
         id: frontdoor
         if: steps.poll-test-plan.outputs.qa-plan-ready == 'true'
         run: |
+          INSTANCE_URL=$(sf org display --target-org "${{ env.SCRATCH_ORG_ALIAS }}" --json | jq -r '.result.instanceUrl')
           URL=$(sf org open --url-only --target-org "${{ env.SCRATCH_ORG_ALIAS }}" --json | jq -r '.result.url')
           if [ -n "$URL" ] && [ "$URL" != "null" ]; then
             echo "url=$URL" >> $GITHUB_OUTPUT
+            echo "instance-url=$INSTANCE_URL" >> $GITHUB_OUTPUT
             echo "::notice::Frontdoor URL generated for E2E tests"
           else
             echo "url=" >> $GITHUB_OUTPUT
+            echo "instance-url=" >> $GITHUB_OUTPUT
             echo "::warning::Could not generate frontdoor URL — E2E tests will be skipped"
           fi
 
@@ -409,14 +412,23 @@ jobs:
 
             Do NOT use MCP browser tools (browser_navigate, browser_take_screenshot, etc.) — they are not available in this environment. Do NOT search for them via ToolSearch.
 
-            Instead, write a Node.js script (.mjs) and run it with `node`:
+            Instead, write ONE Node.js script (.mjs) for ALL E2E scenarios and run it with `node`:
             - Playwright is pre-installed: `import { chromium } from 'playwright';`
             - Chromium binary: use `executablePath: '/usr/bin/chromium'` in launch options
             - Frontdoor URL for scratch org login: ${{ steps.frontdoor.outputs.url }}
+            - Instance URL for direct navigation: ${{ steps.frontdoor.outputs.instance-url }}
             - Launch args: `['--no-sandbox', '--disable-dev-shm-usage']`
             - Save screenshots with: `await page.screenshot({ path: '/tmp/qa-screenshots/<scenario-id>.png' });`
             - Wait for Lightning pages with `waitForFunction` checking for expected text, NOT `waitForLoadState('networkidle')`
             - Use `page.getByRole()` and `page.getByText()` for element selection — NOT CSS selectors
+
+            IMPORTANT performance rules:
+            - Write ONE script for ALL E2E scenarios — do NOT write separate scripts per scenario
+            - Authenticate ONCE via the frontdoor URL at the start of the script
+            - Navigate directly to record pages using: `${instanceUrl}/lightning/r/<Object>/<Id>/view`
+            - Reuse record IDs from Phase 1 data test results (records already created)
+            - Wrap each scenario in try/catch so a failure does not abort remaining scenarios
+            - On failure, take a diagnostic screenshot before continuing to the next scenario
 
             If the frontdoor URL above is empty, skip Phase 2 and note "frontdoor URL not available" in results.
 
@@ -450,6 +462,12 @@ jobs:
             If the results are partial (e.g., E2E tests did not complete), include whatever data test results are available and note which phases were incomplete.
 
             Generate and post the QA report on PR for issue #${{ env.NUMBER }} in ${{ github.repository }}.
+
+            IMPORTANT for screenshot links in the report:
+            Do NOT use relative paths like [view](.verification/qa/ET-001.png) — they do not work in issue comments.
+            Instead, add this line in the E2E Tests section header:
+            "Screenshots available in the [Actions artifacts](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            In individual E2E test rows, use "see artifacts" in the Screenshot column instead of broken relative links.
 
             After posting the report, commit screenshots if any exist:
             cp /tmp/qa-screenshots/*.png .verification/qa/ 2>/dev/null && git add .verification/qa/ && git commit -m "qa: screenshots for issue #${{ env.NUMBER }}" && git push || true

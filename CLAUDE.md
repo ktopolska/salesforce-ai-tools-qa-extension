@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/005-reliable-e2e-playwright/plan.md
+at specs/006-fix-screenshots-speed/plan.md
 <!-- SPECKIT END -->
