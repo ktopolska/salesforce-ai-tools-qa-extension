@@ -12,9 +12,14 @@ Post this as a comment via `gh pr comment` or `gh issue comment`:
 **Result**: <PASS or FINDINGS> | **Pass rate**: <passed>/<total> (<percent>%)
 
 ### Data Tests
-| # | Scenario | Result | Details |
-|---|----------|--------|---------|
-| DT-001 | <title> | PASS/FAIL | <assertion detail or "all assertions passed"> |
+| # | Scenario | Result | Fix Attempted | Details |
+|---|----------|--------|---------------|---------|
+| DT-001 | <title> | PASS/FAIL/UNRESOLVED | Yes/No | <assertion detail or "all assertions passed"> |
+
+Result statuses:
+- **PASS** — check succeeded
+- **FAIL** — check failed, no code-level fix was possible
+- **UNRESOLVED** — check failed, a fix was attempted but the check still fails after re-deploy
 
 ### E2E Tests
 
@@ -27,10 +32,24 @@ Screenshots available in the [Actions artifacts](<run-url>)
 ### Failures
 _(omit this section if all tests passed)_
 
-#### Root Cause 1: <category>
+Group failures into two subsections:
+
+#### Failed (no fix attempted)
+_(checks that failed but no code-level fix was applicable)_
+
+##### Root Cause 1: <category>
 **Severity**: Critical/High/Medium/Low
 **Scenarios**: DT-002, ET-003
 **Summary**: <what went wrong and likely why>
+**Evidence**: <SOQL results, screenshot references>
+
+#### Unresolved (fix attempted)
+_(checks that failed, a fix was attempted, but the check still fails after re-deploy)_
+
+##### Root Cause 1: <category>
+**Severity**: Critical/High/Medium/Low
+**Scenarios**: DT-004
+**Summary**: <what went wrong, what fix was attempted, why it still fails>
 **Evidence**: <SOQL results, screenshot references>
 ```
 

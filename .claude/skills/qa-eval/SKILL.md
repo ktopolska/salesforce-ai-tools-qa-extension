@@ -15,9 +15,12 @@ You will receive:
 ### 1. Load Results
 
 Read `/tmp/qa-results.json`. Extract:
-- Total scenarios, passed count, failed count
+- Total scenarios, passed count, failed count, unresolved count
 - Per-scenario details (ID, title, type, phase, result, details)
+- For each scenario: `fix_attempted` (boolean) and `fix_details` (string, what was tried) if present
 - Whether Phase 2 was skipped and why
+
+Valid result statuses: **PASS**, **FAIL**, **UNRESOLVED** (check failed, fix was attempted, still fails).
 
 **If the file does not exist or is empty**: Post a comment on the PR/issue noting "QA tests could not complete — no results available." Then stop.
 
@@ -25,7 +28,7 @@ Read `/tmp/qa-results.json`. Extract:
 
 ### 2. Classify Failures
 
-For each failed scenario:
+For each failed or unresolved scenario:
 
 1. **Identify the type**: Read `~/.claude/skills/_qa-shared/type-registry.md` to locate the eval module
 2. **Load eval module**: Read `~/.claude/skills/_qa-types/<type>/eval.md`
@@ -35,6 +38,7 @@ For each failed scenario:
    - Promote to Critical if the failure blocks core functionality
    - Demote to Low if it's cosmetic or edge-case-only
 6. **Classify root cause type**: Determine if the failure is **code-level** (wrong logic, missing field, broken automation) or **environment** (org timeout, session expired, Playwright flakiness, network error)
+7. **For UNRESOLVED scenarios**: Note what fix was attempted (`fix_details`) and why it did not resolve the issue. This context is critical for the failure group summary — it tells the human reviewer what has already been tried
 
 ### 3. Group Failures
 
@@ -50,9 +54,9 @@ Read `~/.claude/skills/_qa-shared/sf-reporting.md` for the report template.
 
 Write the report to `/tmp/qa-report.md` following the template structure:
 - Header with pass/fail result and pass rate
-- Data Tests table
-- E2E Tests table with artifact link for screenshots
-- Failures section (grouped by root cause, with severity and fix suggestions)
+- Data Tests table (include a "Fix Attempted" column showing what was tried for FAIL/UNRESOLVED scenarios)
+- E2E Tests table with artifact link for screenshots (same "Fix Attempted" column)
+- Failures section (grouped by root cause, with severity and fix suggestions). For UNRESOLVED scenarios, include what fix was attempted and the outcome under the group summary.
 
 **Screenshot links**: Do NOT use relative paths. Instead:
 - Add in the E2E Tests section header: `Screenshots available in the [Actions artifacts](<run-url>)`
@@ -78,7 +82,7 @@ gh issue comment $ISSUE_NUMBER --repo $REPO --body-file /tmp/qa-report.md
 
 ### 6. Manage Labels
 
-**`qa-findings` label** — applies when any test failed:
+**`qa-findings` label** — applies when any test failed (FAIL or UNRESOLVED):
 ```bash
 gh pr edit $PR_NUMBER --repo $REPO --add-label "qa-findings"
 ```
@@ -104,7 +108,7 @@ gh issue edit $ISSUE_NUMBER --repo $REPO --remove-label "qa-fix-needed" 2>/dev/n
 
 Output a brief summary:
 - "QA Report posted on PR #<number>: <passed>/<total> scenarios passed (<percent>%)"
-- If failures: "Found <n> issues across <categories> categories. Highest severity: <level>."
+- If failures: "Found <n> issues (<X> failed, <Y> unresolved after fix attempts) across <categories> categories. Highest severity: <level>."
 - If all passed: "All scenarios passed. No findings."
 
 ## Key Principles
@@ -112,5 +116,6 @@ Output a brief summary:
 - **Root cause, not symptoms**: Group failures by WHY they failed, not by which test failed. Two tests failing for the same Flow entry condition bug is one finding, not two.
 - **Actionable suggestions**: Every failure group includes a fix suggestion from the type eval module.
 - **Evidence-based**: Link SOQL results and screenshots to specific failures.
-- **Code vs environment**: Distinguish code-level bugs (label `qa-fix-needed`) from environment flakiness (label `qa-findings` only).
+- **Code vs environment**: Distinguish code-level bugs (label `qa-fix-needed`) from environment flakiness (label `qa-findings` only). UNRESOLVED scenarios are code-level by definition — a fix was attempted and failed.
+- **Fix transparency**: For UNRESOLVED scenarios, always surface what was tried so human reviewers do not repeat the same approach.
 - **Non-blocking**: QA findings are informational. The report does not block the PR — humans decide whether to act on findings.

@@ -310,6 +310,39 @@ jobs:
       - name: Provision or restore scratch org
         run: HEADLESS=true ./scripts/create-scratch-org.sh
 
+      # ─── QA SCENARIO GENERATION ──────────────────────────────────────
+      # Generate abstract test scenarios BEFORE dev so the dev agent
+      # knows what QA will verify. Failure does not block dev work.
+      - name: Generate QA scenarios
+        uses: anthropics/claude-code-action@v1
+        id: claude-qa-scenarios
+        continue-on-error: true
+        with:
+          prompt: |
+            Read ~/.claude/skills/qa-plan/SKILL.md for instructions.
+
+            Generate abstract test scenarios for issue #${{ env.NUMBER }} in ${{ github.repository }}.
+
+            The triage plan (what the dev agent committed to):
+
+            --- Plan ---
+            ${{ needs.triage.outputs.plan }}
+            --- End plan ---
+          claude_args: "--max-turns 15 --model claude-sonnet-4-6"
+          additional_permissions: "Bash(git*)"
+          show_full_output: "true"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Report QA scenarios AI cost
+        if: steps.claude-qa-scenarios.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
+          EXECUTION_FILE: ${{ steps.claude-qa-scenarios.outputs.execution_file }}
+        run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
+
       - name: Do the work
         uses: anthropics/claude-code-action@v1
         id: claude-dev
@@ -327,6 +360,13 @@ jobs:
 
             Read the full thread for context (`gh ${{ env.KIND == 'pr' && 'pr' || 'issue' }} view ${{ env.NUMBER }} --repo ${{ github.repository }} --comments`).
 
+            QA scenarios (what will be independently verified — build your solution to handle these):
+            If the file /tmp/test-scenarios.md exists, read it. These are the test scenarios
+            that will be run against your implementation after you finish. Do not modify this file.
+            Use these scenarios to inform your implementation — make sure your solution handles
+            the cases described, especially negative cases and boundary conditions.
+            If the file does not exist, proceed normally with just the plan above.
+
             Tone for human-facing text: strong opinions, no "Great question!" or "I'd be happy to help!", brevity mandatory, no emojis, call out anything unclear or risky.
           claude_args: "--max-turns 90 --model claude-sonnet-4-6"
           show_full_output: "true"
@@ -343,8 +383,9 @@ jobs:
         run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
 
       # ─── QA TRACK (inline) ───────────────────────────────────────────
-      # After dev work completes, query org metadata, generate a test
-      # plan, then run QA tests in this same scratch org session.
+      # After dev work completes, query org metadata, materialize
+      # abstract scenarios into concrete checks, run them, fix failures,
+      # then post an independent QA verdict.
 
       - name: Query org metadata for QA
         id: org-metadata
@@ -359,12 +400,21 @@ jobs:
               FOUND_OBJECTS="$FOUND_OBJECTS $obj"
             fi
           done
+          if [ -f /tmp/test-scenarios.md ]; then
+            for obj in $KNOWN_OBJECTS; do
+              if grep -qiw "$obj" /tmp/test-scenarios.md; then
+                FOUND_OBJECTS="$FOUND_OBJECTS $obj"
+              fi
+            done
+          fi
           CUSTOM_OBJECTS=$(echo "$TRIAGE_PLAN" | grep -oE '[A-Za-z_]+__c' | sort -u | tr '\n' ' ')
-          FOUND_OBJECTS="$FOUND_OBJECTS $CUSTOM_OBJECTS"
-          FOUND_OBJECTS=$(echo "$FOUND_OBJECTS" | xargs)
+          if [ -f /tmp/test-scenarios.md ]; then
+            CUSTOM_OBJECTS="$CUSTOM_OBJECTS $(grep -oE '[A-Za-z_]+__c' /tmp/test-scenarios.md | sort -u | tr '\n' ' ')"
+          fi
+          FOUND_OBJECTS=$(echo "$FOUND_OBJECTS $CUSTOM_OBJECTS" | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)
 
           if [ -z "$FOUND_OBJECTS" ]; then
-            echo "::notice::No Salesforce objects found in triage plan — skipping metadata query"
+            echo "::notice::No Salesforce objects found in triage plan or scenarios — skipping metadata query"
             > /tmp/org-metadata.txt
             exit 0
           fi
@@ -380,47 +430,13 @@ jobs:
           done
           echo "::notice::Org metadata written to /tmp/org-metadata.txt"
 
-      - name: Generate test plan
-        if: steps.claude-dev.outcome == 'success'
-        uses: anthropics/claude-code-action@v1
-        id: claude-qa-plan
-        continue-on-error: true
-        with:
-          prompt: |
-            Read ~/.claude/skills/qa-plan/SKILL.md for instructions.
-
-            Generate a test plan for issue #${{ env.NUMBER }} in ${{ github.repository }}.
-
-            Pre-queried org metadata is at /tmp/org-metadata.txt — read it for field API names, types, and picklist values.
-            If the file is empty or missing, generate scenarios from the issue text alone.
-
-            The triage plan (what the dev agent committed to):
-
-            --- Plan ---
-            ${{ needs.triage.outputs.plan }}
-            --- End plan ---
-          claude_args: "--max-turns 15 --model claude-sonnet-4-6"
-          additional_permissions: "Bash(git*)"
-          show_full_output: "true"
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Report QA plan AI cost
-        if: steps.claude-qa-plan.outcome != 'skipped'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
-          EXECUTION_FILE: ${{ steps.claude-qa-plan.outputs.execution_file }}
-        run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
-
       - name: Pre-install Playwright for QA scripts
-        if: steps.claude-qa-plan.outcome == 'success'
+        if: steps.claude-dev.outcome == 'success'
         run: npm install --no-save playwright
 
       - name: Generate frontdoor URL
         id: frontdoor
-        if: steps.claude-qa-plan.outcome == 'success'
+        if: steps.claude-dev.outcome == 'success'
         run: |
           INSTANCE_URL=$(sf org display --target-org "${{ env.SCRATCH_ORG_ALIAS }}" --json | jq -r '.result.instanceUrl')
           URL=$(sf org open --url-only --target-org "${{ env.SCRATCH_ORG_ALIAS }}" --json | jq -r '.result.url')
@@ -434,43 +450,51 @@ jobs:
             echo "::warning::Could not generate frontdoor URL — E2E tests will be skipped"
           fi
 
-      - name: Run QA tests
-        if: steps.claude-qa-plan.outcome == 'success'
+      - name: Dev self-check and fix
+        if: steps.claude-dev.outcome == 'success'
         uses: anthropics/claude-code-action@v1
-        id: claude-qa-run
+        id: claude-qa-fix
         continue-on-error: true
         with:
           prompt: |
             Read ~/.claude/skills/qa-run/SKILL.md for instructions.
 
-            Execute the test plan at /tmp/test-plan.md against the scratch org aliased "${{ env.SCRATCH_ORG_ALIAS }}".
+            Materialize and run QA checks for issue #${{ env.NUMBER }} in ${{ github.repository }}.
+
+            Abstract test scenarios: /tmp/test-scenarios.md
+            Org metadata: /tmp/org-metadata.txt
+            Scratch org alias: ${{ env.SCRATCH_ORG_ALIAS }}
             Frontdoor URL: ${{ steps.frontdoor.outputs.url }}
             Instance URL: ${{ steps.frontdoor.outputs.instance-url }}
 
-            Before running the E2E script, export these so the template can read them:
+            1. Read the abstract scenarios and org metadata files.
+            2. Materialize each abstract scenario into a concrete check — SOQL/data for data scenarios, Playwright E2E for UI scenarios.
+            3. Run Phase 1 (data checks) first, then Phase 2 (E2E) if <50% of data tests failed.
+            4. For any check that fails with a code-level issue: fix the source code, re-deploy, and re-run the check ONCE. If it still fails, record as "unresolved" and move on.
+            5. Write results incrementally to /tmp/qa-results.json.
+
+            Before running E2E, export these:
             export FRONTDOOR_URL="${{ steps.frontdoor.outputs.url }}"
             export INSTANCE_URL="${{ steps.frontdoor.outputs.instance-url }}"
 
-            If /tmp/test-plan.md does not exist, is empty, or cannot be parsed as a test plan, write an empty results file to /tmp/qa-results.json and stop.
-
-            Write your results to /tmp/qa-results.json as you go. A separate step will handle evaluation and reporting — do NOT read qa-eval or post any report yourself.
-          claude_args: "--max-turns 75 --model claude-sonnet-4-6"
-          additional_permissions: "Bash(git*),Bash(cp*),Bash(mkdir*),Bash(node*),Bash(npm*),Bash(npx*),Bash(find*)"
+            Do NOT post any report — a separate step handles evaluation.
+          claude_args: "--max-turns 55 --model claude-sonnet-4-6"
+          additional_permissions: "Bash(git*),Bash(sf*),Bash(cp*),Bash(mkdir*),Bash(node*),Bash(npm*),Bash(npx*),Bash(find*)"
           show_full_output: "true"
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Report QA run AI cost
-        if: steps.claude-qa-run.outcome != 'skipped'
+      - name: Report QA check AI cost
+        if: steps.claude-qa-fix.outcome != 'skipped'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ needs.triage.outputs.scratch_key }}
-          EXECUTION_FILE: ${{ steps.claude-qa-run.outputs.execution_file }}
+          EXECUTION_FILE: ${{ steps.claude-qa-fix.outputs.execution_file }}
         run: .sf-ai-tools/.github/scripts/report-ai-cost.sh || echo "::warning::cost report failed"
 
       - name: Evaluate and post QA report
-        if: steps.claude-qa-plan.outcome == 'success'
+        if: steps.claude-dev.outcome == 'success'
         uses: anthropics/claude-code-action@v1
         id: claude-qa-eval
         continue-on-error: true
@@ -511,11 +535,11 @@ jobs:
             echo "::error::Dev work failed"
             exit 1
           fi
-          if [ "${{ steps.claude-qa-plan.outcome }}" = "failure" ]; then
-            echo "::warning::QA plan generation failed (advisory — not blocking the job)"
+          if [ "${{ steps.claude-qa-scenarios.outcome }}" = "failure" ]; then
+            echo "::warning::QA scenario generation failed (advisory — not blocking the job)"
           fi
-          if [ "${{ steps.claude-qa-run.outcome }}" = "failure" ]; then
-            echo "::warning::QA test execution failed (advisory — not blocking the job)"
+          if [ "${{ steps.claude-qa-fix.outcome }}" = "failure" ]; then
+            echo "::warning::QA check and fix failed (advisory — not blocking the job)"
           fi
           if [ "${{ steps.claude-qa-eval.outcome }}" = "failure" ]; then
             echo "::warning::QA report generation failed (advisory — not blocking the job)"
