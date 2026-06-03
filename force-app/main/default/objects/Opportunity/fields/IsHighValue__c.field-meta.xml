@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>IsHighValue__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description>Automatically set to true by Flow when Opportunity Amount is >= $100,000.</description>
+    <externalId>false</externalId>
+    <label>Is High Value</label>
+    <trackFeedHistory>false</trackFeedHistory>
+    <type>Checkbox</type>
+</CustomField>
