@@ -75,7 +75,7 @@ jobs:
       - name: Checkout salesforce-ai-tools (skills + scripts)
         uses: actions/checkout@v6
         with:
-          repository: aquivalabs/salesforce-ai-tools
+          repository: ktopolska/salesforce-ai-tools-public
           path: .sf-ai-tools
 
       - name: Install skills and rules globally
@@ -271,7 +271,7 @@ jobs:
       - name: Checkout salesforce-ai-tools (skills + scripts)
         uses: actions/checkout@v6
         with:
-          repository: aquivalabs/salesforce-ai-tools
+          repository: ktopolska/salesforce-ai-tools-public
           path: .sf-ai-tools
 
       - name: Install skills and rules globally
