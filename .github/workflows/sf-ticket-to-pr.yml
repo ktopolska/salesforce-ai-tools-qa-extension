@@ -75,7 +75,7 @@ jobs:
       - name: Checkout salesforce-ai-tools (skills + scripts)
         uses: actions/checkout@v6
         with:
-          repository: ktopolska/salesforce-ai-tools
+          repository: aquivalabs/salesforce-ai-tools
           token: ${{ secrets.SF_AI_TOOLS_TOKEN }}
           path: .sf-ai-tools
 
@@ -272,7 +272,7 @@ jobs:
       - name: Checkout salesforce-ai-tools (skills + scripts)
         uses: actions/checkout@v6
         with:
-          repository: ktopolska/salesforce-ai-tools
+          repository: aquivalabs/salesforce-ai-tools
           token: ${{ secrets.SF_AI_TOOLS_TOKEN }}
           path: .sf-ai-tools
 
